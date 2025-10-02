@@ -1,5 +1,4 @@
 fastapi
 sqlalchemy
 pydantic
-pyscopg2-binary
 uvicorn
