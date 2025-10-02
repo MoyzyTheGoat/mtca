@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import jwt, JWTError
 from ..auth import SECRET_KEY, ALGORITHM
+from jose import jwt, JWTError
 from sqlalchemy.orm import Session
 from fastapi import APIRouter
 from .. import crud, schemas, database
@@ -19,18 +19,7 @@ def get_db():
         db.close()
 
 
-@router.post("/", response_model=schemas.Product)
-def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)):
-    return crud.create_product(db=db, product=product)
-
-
-@router.get("/", response_model=list[schemas.Product])
-def read_products(db: Session = Depends(get_db)):
-    products = crud.get_products(db=db, product_id=0)
-    return products
-
-
-def get_current_user(token: str = Depends(oauth2_scheme)):
+def get_current_user(token: str = Depends(OAuth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
