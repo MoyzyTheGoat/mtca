@@ -29,6 +29,29 @@ class Product(ProductBase):
 class Order(OrderBase):
     id: int
     code: str
+    user_id: int
 
     class Config:
         orm_mode = True
+
+
+class UserBase(BaseModel):
+    username: str
+
+
+class UserCreate(UserBase):
+    password: str
+    is_admin: bool = False
+
+
+class User(UserBase):
+    id: int
+    is_admin: bool
+
+    class Config:
+        orm_mode = True
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
