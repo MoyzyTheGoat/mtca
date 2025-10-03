@@ -1,31 +1,41 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from .. import schemas, crud
-from ..database import SessionLocal
+from .. import crud, schemas, database
 
-router = APIRouter(prefix="/products", tags=["products"])
+router = APIRouter(tags=["products"])
 
 
 def get_db():
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
 
-@router.post("/", response_model=schemas.ProductOut)
-def create_product_endpoint(
-    product: schemas.ProductCreate, db: Session = Depends(get_db)
-):
-    try:
-        return crud.create_product(db, product)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@router.post("/products/", response_model=schemas.productBase)
+def create_product(product: schemas.ProductCreate, db: Session = Depends(get_db)):
+    return crud.create_product(db, product)
 
 
-@router.get("/", response_model=list[schemas.ProductOut])
-def list_products_endpoint(
-    skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
+@router.get("/products/", response_model=list[schemas.productBase])
+def read_products(db: Session = Depends(get_db)):
+    return crud.get_all_products(db)
+
+
+@router.put("/products/{product_id}", response_model=schemas.productBase)
+def update_product(
+    product_id: int, product: schemas.ProductCreate, db: Session = Depends(get_db)
 ):
-    return crud.get_products(db, skip=skip, limit=limit)
+    db_product = crud.update_product(db, product_id, product)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return db_product
+
+
+@router.delete("/products/{product_id}", response_model=schemas.productBase)
+def delete_product(product_id: int, db: Session = Depends(get_db)):
+    db_product = crud.delete_product(db, product_id)
+    if db_product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return db_product
