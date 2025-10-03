@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from .. import crud, schemas, database
 from .auth import oauth2_scheme
 from jose import jwt, JWTError
-from ..auth import SECRET_KEY, ALGORITHM
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 

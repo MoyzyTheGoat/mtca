@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
 from .. import crud, database, schemas
-from ..auth import create_access_token
 
 router = APIRouter()
 
@@ -20,10 +19,10 @@ def get_db():
 
 @router.post("/auth/register", response_model=schemas.User)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    db_user = crud.get_user_by_username(db, username=user.username)
-    if db_user:
+    if crud.get_user_by_username(db, username=user.username):
         raise HTTPException(status_code=400, detail="Username already registered")
-    return crud.create_user(db=db, user=user)
+    new_user = crud.create_user(db=db, user=user)
+    return new_user
 
 
 @router.post("/auth/token")
@@ -33,9 +32,3 @@ def login(
     user = crud.get_user_by_username(db, form_data.username)
     if not user or not crud.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_access_token(data={"sub": user.username, "is_admin": user.is_admin})
-
-    token = create_access_token(
-        data={"sub": user.username, "is_admin": user.is_admin, "user_id": user.id}
-    )
-    return {"access_token": token, "token_type": "bearer"}
