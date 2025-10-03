@@ -1,18 +1,65 @@
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional, List
 
 
-class productBase(BaseModel):
+# PRODUCTS
+class ProductBase(BaseModel):
     name: str
     price: float
     quantity: int
 
 
-class ProductCreate(productBase):
+class ProductCreate(ProductBase):
     pass
 
 
-class OrderBase(BaseModel):
+class ProductUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    quantity: Optional[int] = None
+
+
+class Product(ProductBase):
+    id: int
+
+    class Config:
+        orm_mode = True
+
+
+# ORDERS
+class OrderCreate(BaseModel):
+    product_id: int
+    quantity: int
+
+
+class OrderUpdate(BaseModel):
+    product_id: Optional[int] = None
+    quantity: Optional[int] = None
+
+
+class Order(BaseModel):
+    id: int
     product_id: int
     quantity: int
     code: str
+
+    class Config:
+        orm_mode = True
+
+
+# USERS
+class UserBase(BaseModel):
+    username: str
+
+
+class UserCreate(UserBase):
+    password: str
+    is_admin: bool = False
+
+
+class UserResponse(UserBase):
+    id: int
+    is_admin: bool
+
+    class Config:
+        orm_mode = True

@@ -2,8 +2,27 @@ from sqlalchemy.orm import Session
 from . import models, schemas
 import secrets
 import string
+from passlib.context import CryptContext
+from passlib.exc import MissingBackendError
+
+# Use Argon2
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 
+def get_password_hash(password: str) -> str:
+    try:
+        return pwd_context.hash(password)
+    except MissingBackendError:
+        raise RuntimeError(
+            "Missing Argon2 backend; install argon2_cffi in the environment running the server."
+        )
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+# PRODUCTS
 def create_product(db: Session, product: schemas.ProductCreate):
     db_product = models.Product(**product.dict())
     db.add(db_product)
@@ -22,12 +41,14 @@ def delete_product(db: Session, product_id: int):
     return db_product
 
 
-def update_product(db: Session, product_id: int, product: schemas.ProductCreate):
+def update_product(db: Session, product_id: int, product: schemas.ProductUpdate):
     db_product = (
         db.query(models.Product).filter(models.Product.id == product_id).first()
     )
     if db_product:
-        for key, value in product.dict().items():
+        for key, value in product.dict(exclude_unset=True).items():
+            if key == "id":
+                continue
             setattr(db_product, key, value)
         db.commit()
         db.refresh(db_product)
@@ -38,13 +59,26 @@ def get_all_products(db: Session):
     return db.query(models.Product).all()
 
 
-def create_order(db: Session, order: schemas.OrderBase):
-    db_order = models.Order(**order.dict())
+# ORDERS
+def create_order(db: Session, order: schemas.OrderCreate):
+    # optional: validate product exists
+    product = (
+        db.query(models.Product).filter(models.Product.id == order.product_id).first()
+    )
+    if not product:
+        raise ValueError("Product does not exist")
 
-    # Generate a unique 6-character alphanumeric code
+    db_order = models.Order(**order.dict())
+    # generate unique 6-character alphanumeric code
     code_str = "".join(
         secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
     )
+    # ensure code uniqueness (simple loop)
+    while db.query(models.Order).filter(models.Order.code == code_str).first():
+        code_str = "".join(
+            secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
+        )
+
     db_order.code = code_str
     db.add(db_order)
     db.commit()
@@ -52,10 +86,12 @@ def create_order(db: Session, order: schemas.OrderBase):
     return db_order
 
 
-def update_order(db: Session, order_id: int, order: schemas.OrderBase):
+def update_order(db: Session, order_id: int, order: schemas.OrderUpdate):
     db_order = db.query(models.Order).filter(models.Order.id == order_id).first()
     if db_order:
-        for key, value in order.dict().items():
+        for key, value in order.dict(exclude_unset=True).items():
+            if key in ("id", "code"):
+                continue
             setattr(db_order, key, value)
         db.commit()
         db.refresh(db_order)
@@ -72,3 +108,32 @@ def delete_order(db: Session, order_id: int):
         db.delete(db_order)
         db.commit()
     return db_order
+
+
+def get_order_by_code(db: Session, code: str):
+    return db.query(models.Order).filter(models.Order.code == code).first()
+
+
+# USERS
+def create_user(db: Session, user: schemas.UserCreate):
+    hashed_pw = get_password_hash(user.password)
+    db_user = models.User(
+        username=user.username, hashed_password=hashed_pw, is_admin=user.is_admin
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
+def get_user_by_username(db: Session, username: str):
+    return db.query(models.User).filter(models.User.username == username).first()
+
+
+def authenticate_user(db: Session, username: str, password: str):
+    user = get_user_by_username(db, username)
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
