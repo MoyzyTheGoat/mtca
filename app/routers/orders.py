@@ -1,43 +1,42 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from .. import crud, schemas, database
-from .auth import oauth2_scheme
-from jose import jwt, JWTError
+from .. import schemas, crud
+from ..database import SessionLocal
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 def get_db():
-    db = database.SessionLocal()
+    db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
 
-def get_current_user(token: str = Depends(oauth2_scheme)):
+@router.post("/", response_model=schemas.OrderOut)
+def create_order_endpoint(order: schemas.OrderCreate, db: Session = Depends(get_db)):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return {
-            "username": payload.get("sub"),
-            "is_admin": payload.get("is_admin"),
-            "id": payload.get("user_id"),
-        }
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        return crud.create_order(db, order)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/orders/", response_model=schemas.Order)
-def create_order(
-    order: schemas.OrderCreate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    return crud.create_order(db=db, order=order, user_id=current_user["id"])
+@router.get("/code/{code}", response_model=schemas.OrderOut)
+def get_order_by_code_endpoint(code: str, db: Session = Depends(get_db)):
+    order = crud.get_order_by_code(db, code)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order
 
 
-@router.get("/orders/", response_model=list[schemas.Order])
-def read_orders(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    if current_user["is_admin"]:
-        return crud.get_all_orders(db)
-    return crud.get_orders_by_user(db, current_user["id"])
+@router.post("/code/{code}/pickup", response_model=schemas.OrderOut)
+def pickup_order_endpoint(code: str, db: Session = Depends(get_db)):
+    order = crud.get_order_by_code(db, code)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.picked_up:
+        raise HTTPException(status_code=400, detail="Order already picked up")
+    return crud.mark_order_picked(db, order)

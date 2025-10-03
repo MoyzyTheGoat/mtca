@@ -1,58 +1,46 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, conint
+from typing import List, Optional
 
 
-class ProductBase(BaseModel):
+class ProductCreate(BaseModel):
     name: str
     price: float
+    stock: int
+
+
+class ProductOut(BaseModel):
+    id: int
+    name: str
+    price: float
+    stock: int
+
+    class Config:
+        orm_mode = True
+
+
+class OrderItemCreate(BaseModel):
+    product_id: int
     quantity: int
 
 
-class OrderBase(BaseModel):
-    items: str
+class OrderCreate(BaseModel):
+    items: List[OrderItemCreate]
 
 
-class ProductCreate(ProductBase):
-    pass
-
-
-class OrderCreate(OrderBase):
-    pass
-
-
-class Product(ProductBase):
-    id: int
+class OrderItemOut(BaseModel):
+    product_id: int
+    quantity: int
+    price_at_order: float
 
     class Config:
         orm_mode = True
 
 
-class Order(OrderBase):
+class OrderOut(BaseModel):
     id: int
     code: str
-    user_id: int
+    picked_up: bool
+    items: List[OrderItemOut]
 
     class Config:
         orm_mode = True
-
-
-class UserBase(BaseModel):
-    username: str
-    email: str
-
-
-class UserCreate(UserBase):
-    password: str
-    is_admin: bool = False
-
-
-class User(UserBase):
-    id: int
-    is_admin: bool
-
-    class Config:
-        orm_mode = True
-
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str

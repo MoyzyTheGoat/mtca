@@ -1,19 +1,12 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
-import random
+import secrets
 import string
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-def get_products(db: Session, product_id: int):
-    return db.query(models.Product).all()
 
 
 def create_product(db: Session, product: schemas.ProductCreate):
     db_product = models.Product(
-        name=product.name, price=product.price, quantity=product.quantity
+        name=product.name, price=product.price, stock=product.stock
     )
     db.add(db_product)
     db.commit()
@@ -21,14 +14,48 @@ def create_product(db: Session, product: schemas.ProductCreate):
     return db_product
 
 
-def generate_order_code(length=6):
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
+def get_products(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Product).offset(skip).limit(limit).all()
 
 
-def create_order(db: Session, order: schemas.OrderCreate):
-    code = generate_order_code()
-    db_order = models.Order(code=code, items=order.items)
+def _generate_code():
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(6))
+
+
+def _generate_unique_code(db: Session):
+    for _ in range(1000):
+        code = _generate_code()
+        exists = db.query(models.Order).filter(models.Order.code == code).first()
+        if not exists:
+            return code
+    raise Exception("Unable to generate unique code")
+
+
+def create_order(db: Session, order_in: schemas.OrderCreate):
+    code = _generate_unique_code(db)
+    db_order = models.Order(code=code)
     db.add(db_order)
+    for item in order_in.items:
+        product = (
+            db.query(models.Product)
+            .filter(models.Product.id == item.product_id)
+            .first()
+        )
+        if not product:
+            db.rollback()
+            raise ValueError(f"Product id {item.product_id} not found")
+        if product.stock < item.quantity:
+            db.rollback()
+            raise ValueError(f"Not enough stock for product id {item.product_id}")
+        product.stock -= item.quantity
+        order_item = models.OrderItem(
+            order=db_order,
+            product_id=product.id,
+            quantity=item.quantity,
+            price_at_order=product.price,
+        )
+        db.add(order_item)
     db.commit()
     db.refresh(db_order)
     return db_order
@@ -38,32 +65,9 @@ def get_order_by_code(db: Session, code: str):
     return db.query(models.Order).filter(models.Order.code == code).first()
 
 
-def get_all_orders(db: Session):
-    return db.query(models.Order).all()
-
-
-def get_orders_by_user(db: Session, user_id: int):
-    return db.query(models.Order).filter(models.Order.user_id == user_id).all()
-
-
-def hash_password(password: str):
-    return pwd_context.hash(password)
-
-
-def verify_password(plain_password: str, hashed_password: str):
-    return pwd_context.verify(plain_password, hashed_password)
-
-
-def create_user(db: Session, user: schemas.UserCreate):
-    hashed_password = hash_password(user.password)
-    db_user = models.User(
-        username=user.username, email=user.email, hashed_password=hashed_password
-    )
-    db.add(db_user)
+def mark_order_picked(db: Session, order: models.Order):
+    order.picked_up = True
+    db.add(order)
     db.commit()
-    db.refresh(db_user)
-    return db_user
-
-
-def get_user_by_username(db: Session, username: str):
-    return db.query(models.Users).filter(models.Users.username == username).first()
+    db.refresh(order)
+    return order
