@@ -5,7 +5,6 @@ from .routers import products, orders, users
 app = FastAPI(title="Queue Reducer")
 
 # create tables
-Base.metadata.create_all(bind=engine)
 
 app.include_router(products.router)
 app.include_router(orders.router)

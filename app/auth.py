@@ -1,3 +1,6 @@
+import os
+from dotenv import load_dotenv
+
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
@@ -6,9 +9,10 @@ from sqlalchemy.orm import Session
 from . import crud, models
 from .database import get_db
 
-SECRET_KEY = "254f36fd95910b1af513168cf9dd279ced4b368291091969ecffaca8c0f7863e"
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+load_dotenv()
+SECRET_KEY = os.getenv("SECRET_KEY")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./mtca.db")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
