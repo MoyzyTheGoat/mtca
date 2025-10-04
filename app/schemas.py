@@ -69,3 +69,7 @@ class UserResponse(UserBase):
 
     class Config:
         orm_mode = True
+
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str

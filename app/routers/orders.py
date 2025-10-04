@@ -8,7 +8,7 @@ router = APIRouter(tags=["orders"])
 
 @router.post("/orders/", response_model=schemas.Order)
 def create_order(
-    order: schemas.OrderCreate,
+    order: list[schemas.OrderCreate],
     db: Session = Depends(get_db),
     current_user=Depends(auth.get_current_user),
 ):

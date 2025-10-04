@@ -60,19 +60,35 @@ def get_all_products(db: Session):
 
 
 # ORDERS
-def create_order(db: Session, order: schemas.OrderCreate):
-    # optional: validate product exists
-    product = (
-        db.query(models.Product).filter(models.Product.id == order.product_id).first()
-    )
-    if not product:
-        raise ValueError("Product does not exist")
+def create_order(db: Session, order: list[schemas.OrderCreate]):
+    for item in order:
+        if isinstance(item, dict):
+            item = schemas.OrderCreate(**item)  # convert dict to Pydantic model
 
-    db_order = models.Order(**order.dict())
-    # generate unique 6-character alphanumeric code
-    code_str = "".join(
-        secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
-    )
+        # optional: validate product exists
+        product = (
+            db.query(models.Product)
+            .filter(models.Product.id == item.product_id)
+            .first()
+        )
+        if not product:
+            raise ValueError(f"Product with ID {item.product_id} does not exist")
+
+        db_order = models.Order(**item.dict())
+        # generate unique 6-character alphanumeric code
+        code_str = "".join(
+            secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
+        )
+        # ensure code uniqueness (simple loop)
+        while db.query(models.Order).filter(models.Order.code == code_str).first():
+            code_str = "".join(
+                secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
+            )
+        db_order.code = code_str
+        db.add(db_order)
+        db.commit()
+        return db_order
+
     # ensure code uniqueness (simple loop)
     while db.query(models.Order).filter(models.Order.code == code_str).first():
         code_str = "".join(
@@ -98,8 +114,8 @@ def update_order(db: Session, order_id: int, order: schemas.OrderUpdate):
     return db_order
 
 
-def get_all_orders(db: Session):
-    return db.query(models.Order).all()
+def get_all_orders(db: Session, limit: int = 10, offset: int = 0):
+    return db.query(models.Order).limit(limit).offset(offset).all()
 
 
 def delete_order(db: Session, order_id: int):
