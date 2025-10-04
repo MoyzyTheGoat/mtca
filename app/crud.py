@@ -13,9 +13,7 @@ def get_password_hash(password: str) -> str:
     try:
         return pwd_context.hash(password)
     except MissingBackendError:
-        raise RuntimeError(
-            "Missing Argon2 backend; install argon2_cffi in the environment running the server."
-        )
+        raise RuntimeError("Missing Argon2")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
