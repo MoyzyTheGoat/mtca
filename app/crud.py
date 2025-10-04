@@ -137,3 +137,11 @@ def authenticate_user(db: Session, username: str, password: str):
     if not verify_password(password, user.hashed_password):
         return None
     return user
+
+
+def get_product(db: Session, product_id: int):
+    return db.query(models.Product).filter(models.Product.id == product_id).first()
+
+
+def get_order(db: Session, order_id: int):
+    return db.query(models.Order).filter(models.Order.id == order_id).first()

@@ -33,9 +33,12 @@ def update_order(
 
 @router.get("/orders/", response_model=list[schemas.Order])
 def read_orders(
-    db: Session = Depends(get_db), current_user=Depends(auth.get_current_user)
+    db: Session = Depends(get_db),
+    current_user=Depends(auth.get_current_user),
+    limit: int = 10,
+    offset: int = 0,
 ):
-    return crud.get_all_orders(db)
+    return crud.get_all_orders(db, limit=limit, offset=offset)
 
 
 @router.get("/orders/code/{code}", response_model=schemas.Order)
@@ -60,3 +63,11 @@ def delete_order(
     if db_order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     return db_order
+
+
+@router.get("/{order_id}", response_model=schemas.Order)
+def get_order(order_id: int, db: Session = Depends(get_db)):
+    order = crud.get_order(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order

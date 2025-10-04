@@ -16,8 +16,8 @@ def create_product(
 
 
 @router.get("/products/", response_model=list[schemas.Product])
-def read_products(db: Session = Depends(get_db)):
-    return crud.get_all_products(db)
+def read_products(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
+    return crud.get_all_products(db, limit=limit, offset=offset)
 
 
 @router.put("/products/{product_id}", response_model=schemas.Product)
@@ -43,3 +43,11 @@ def delete_product(
     if db_product is None:
         raise HTTPException(status_code=404, detail="Product not found")
     return db_product
+
+
+@router.get("/{product_id}", response_model=schemas.Product)
+def get_product(product_id: int, db: Session = Depends(get_db)):
+    product = crud.get_product(db, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return product

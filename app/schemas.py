@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional, List
 
 
@@ -30,6 +30,12 @@ class Product(ProductBase):
 class OrderCreate(BaseModel):
     product_id: int
     quantity: int
+
+    @validator("quantity")
+    def quantity_must_be_positive(cls, v):
+        if v <= 0:
+            raise ValueError("Quantity must be greater than 0")
+        return v
 
 
 class OrderUpdate(BaseModel):
