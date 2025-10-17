@@ -61,9 +61,7 @@ def get_all_products(db: Session):
 def create_order(db: Session, order: list[schemas.OrderCreate]):
     for item in order:
         if isinstance(item, dict):
-            item = schemas.OrderCreate(**item)  # convert dict to Pydantic model
-
-        # optional: validate product exists
+            item = schemas.OrderCreate(**item)
         product = (
             db.query(models.Product)
             .filter(models.Product.id == item.product_id)

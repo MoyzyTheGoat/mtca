@@ -10,7 +10,6 @@ class Product(Base):
     name = Column(String, index=True)
     price = Column(Float)
     quantity = Column(Integer)
-
     orders = relationship("Order", back_populates="product")
 
 
