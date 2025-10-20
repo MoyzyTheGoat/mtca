@@ -33,4 +33,19 @@ dockerfile
 /tmp/
 alembic/__pycache__/
 alembic/versions/__pycache__/
+node_modules/
+dist/
+build/
+*.egg-info/
+.coverage
+htmlcov/
+.tox/
+.gitignore
+.pytest_cache/
+.cache/
+.mypy_cache/
+.pyre/
+.dmypy.json
+.pytype/    
+npm-debug.log*
 

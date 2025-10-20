@@ -53,8 +53,8 @@ def update_product(db: Session, product_id: int, product: schemas.ProductUpdate)
     return db_product
 
 
-def get_all_products(db: Session):
-    return db.query(models.Product).all()
+def get_all_products(db: Session, limit: int = 10, offset: int = 0):
+    return db.query(models.Product).limit(limit).offset(offset).all()
 
 
 # ORDERS
