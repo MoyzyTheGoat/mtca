@@ -48,4 +48,4 @@ htmlcov/
 .dmypy.json
 .pytype/    
 npm-debug.log*
-
+backendvenv/
