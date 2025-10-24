@@ -1,47 +1,69 @@
-// src/pages/Checkout.jsx
 import React, { useState } from "react";
-import api from "../api/axios";
 import { useNavigate } from "react-router-dom";
+import api from "../api/axios";
 
 export default function Checkout() {
-    const navigate = useNavigate();
-    const cart = JSON.parse(localStorage.getItem("cart") || "[]");
     const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const navigate = useNavigate();
+
+    const cart = JSON.parse(localStorage.getItem("cart") || "[]");
 
     const placeOrder = async () => {
-        if (cart.length === 0) return alert("Cart is empty");
         setBusy(true);
+        setError("");
         try {
-            const payload = cart.map(i => ({ product_id: i.product_id, quantity: i.quantity }));
+            const payload = cart.map((item) => ({
+                product_id: item.id,
+                quantity: item.quantity,
+            }));
             const res = await api.post("/orders/", payload);
             localStorage.removeItem("cart");
-            const code = res.data?.code || (Array.isArray(res.data) ? res.data[0]?.code : null);
-            alert("Order placed. Code: " + (code || "Check admin"));
-            navigate("/");
-        } catch (e) {
-            console.error(e);
-            alert("Failed to place order: " + (e.response?.data?.detail || e.message));
+
+            // Navigate to order code page with the generated code
+            navigate(`/order/${res.data.code}`);
+        } catch (err) {
+            setError(err.response?.data?.detail || "Order failed");
+            console.error(err);
         } finally {
             setBusy(false);
         }
     };
 
-    const total = cart.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
+    if (!cart.length) {
+        return <div className="text-center text-gray-500 py-20">Cart is empty.</div>;
+    }
+
+    const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
     return (
-        <div className="max-w-xl mx-auto bg-white p-6 rounded shadow">
-            <h2 className="text-xl font-semibold mb-4">Checkout</h2>
-            <div className="space-y-2">
-                {cart.map((i, idx) => (
-                    <div key={idx} className="flex justify-between">
-                        <div>{i.name} × {i.quantity}</div>
-                        <div>₦{(i.price * i.quantity).toFixed(2)}</div>
+        <div className="max-w-3xl mx-auto bg-white p-6 rounded-xl shadow">
+            <h1 className="text-2xl font-bold mb-4">Checkout</h1>
+
+            {cart.map((item) => (
+                <div key={item.id} className="flex justify-between py-2 border-b">
+                    <div>
+                        {item.name} × {item.quantity}
                     </div>
-                ))}
+                    <div>₦{item.price * item.quantity}</div>
+                </div>
+            ))}
+
+            <div className="flex justify-between font-semibold text-lg mt-4">
+                <span>Total:</span>
+                <span>₦{total}</span>
             </div>
-            <div className="mt-4 font-bold">Total: ₦{total.toFixed(2)}</div>
-            <div className="mt-4 flex justify-end">
-                <button disabled={busy} onClick={placeOrder} className="px-4 py-2 bg-brand-500 text-white rounded">{busy ? "Placing..." : "Place order"}</button>
+
+            {error && <p className="text-red-500 mt-2">{error}</p>}
+
+            <div className="mt-6 text-right">
+                <button
+                    disabled={busy}
+                    onClick={placeOrder}
+                    className="px-5 py-2 bg-brand-500 text-white rounded hover:bg-brand-600"
+                >
+                    {busy ? "Placing order..." : "Place Order"}
+                </button>
             </div>
         </div>
     );

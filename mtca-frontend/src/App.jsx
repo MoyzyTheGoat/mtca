@@ -8,6 +8,8 @@ import Cart from "./pages/Cart";
 import Checkout from "./pages/Checkout";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import OrderCode from "./pages/OrderCode";
+
 
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -25,6 +27,8 @@ export default function App() {
           <Route path="/checkout" element={<Checkout />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/order/:code" element={<OrderCode />} />
+
 
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<AdminDashboard />} />
