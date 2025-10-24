@@ -1,3 +1,4 @@
+// src/pages/Checkout.jsx
 import React, { useState } from "react";
 import api from "../api/axios";
 import { useNavigate } from "react-router-dom";
@@ -5,39 +6,43 @@ import { useNavigate } from "react-router-dom";
 export default function Checkout() {
     const navigate = useNavigate();
     const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+    const [busy, setBusy] = useState(false);
 
-    const [loading, setLoading] = useState(false);
-
-    const handlePlaceOrder = async () => {
+    const placeOrder = async () => {
         if (cart.length === 0) return alert("Cart is empty");
-        setLoading(true);
-
-        // backend expects POST /orders/ with list of OrderCreate objects {product_id, quantity}
-        const payload = cart.map((i) => ({ product_id: i.product_id, quantity: i.quantity }));
+        setBusy(true);
         try {
+            const payload = cart.map(i => ({ product_id: i.product_id, quantity: i.quantity }));
             const res = await api.post("/orders/", payload);
-            // backend returns the created order (or last created order in your crud)
-            // We'll clear cart and show pick-up code if present
             localStorage.removeItem("cart");
-            setLoading(false);
             const code = res.data?.code || (Array.isArray(res.data) ? res.data[0]?.code : null);
-            alert(`Order placed. Pick up code: ${code || "Check admin for code"}`);
+            alert("Order placed. Code: " + (code || "Check admin"));
             navigate("/");
         } catch (e) {
-            setLoading(false);
             console.error(e);
-            alert("Failed to place order. Check console.");
+            alert("Failed to place order: " + (e.response?.data?.detail || e.message));
+        } finally {
+            setBusy(false);
         }
     };
 
-    return (
-        <div>
-            <h1 className="text-2xl font-bold mb-4">Checkout</h1>
-            <p className="mb-4">Confirm order & place it. You will get a unique 6-character pickup code.</p>
+    const total = cart.reduce((s, i) => s + (i.price || 0) * i.quantity, 0);
 
-            <button onClick={handlePlaceOrder} className="px-4 py-2 bg-indigo-600 text-white rounded" disabled={loading}>
-                {loading ? "Placing..." : "Place Order"}
-            </button>
+    return (
+        <div className="max-w-xl mx-auto bg-white p-6 rounded shadow">
+            <h2 className="text-xl font-semibold mb-4">Checkout</h2>
+            <div className="space-y-2">
+                {cart.map((i, idx) => (
+                    <div key={idx} className="flex justify-between">
+                        <div>{i.name} × {i.quantity}</div>
+                        <div>₦{(i.price * i.quantity).toFixed(2)}</div>
+                    </div>
+                ))}
+            </div>
+            <div className="mt-4 font-bold">Total: ₦{total.toFixed(2)}</div>
+            <div className="mt-4 flex justify-end">
+                <button disabled={busy} onClick={placeOrder} className="px-4 py-2 bg-brand-500 text-white rounded">{busy ? "Placing..." : "Place order"}</button>
+            </div>
         </div>
     );
 }

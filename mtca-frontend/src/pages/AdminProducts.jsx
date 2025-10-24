@@ -1,3 +1,4 @@
+// src/pages/AdminProducts.jsx
 import React, { useEffect, useState } from "react";
 import api from "../api/axios";
 
@@ -5,56 +6,50 @@ export default function AdminProducts() {
     const [products, setProducts] = useState([]);
     const [form, setForm] = useState({ name: "", price: 0, quantity: 0 });
 
-    useEffect(() => {
-        fetchProducts();
-    }, []);
+    useEffect(() => { fetchProducts(); }, []);
 
-    async function fetchProducts() {
+    const fetchProducts = async () => {
         try {
             const res = await api.get("/products/");
-            setProducts(res.data);
+            setProducts(res.data || []);
         } catch (e) {
-            console.error(e);
             alert("Failed to load products");
+            console.error(e);
         }
-    }
+    };
 
-    async function createProduct(e) {
+    const createProduct = async (e) => {
         e.preventDefault();
         try {
-            const res = await api.post("/products/", form);
-            alert("Created product");
+            await api.post("/products/", form);
             setForm({ name: "", price: 0, quantity: 0 });
             fetchProducts();
-        } catch (err) {
-            console.error(err);
-            alert("Create failed: " + (err?.response?.data?.detail || err.message));
+        } catch (e) {
+            alert("Create failed: " + (e.response?.data?.detail || e.message));
         }
-    }
+    };
 
-    async function deleteProduct(id) {
-        if (!confirm("Delete product?")) return;
+    const deleteProduct = async (id) => {
+        if (!confirm("Delete?")) return;
         try {
             await api.delete(`/products/${id}`);
             fetchProducts();
         } catch (e) {
-            console.error(e);
             alert("Delete failed");
         }
-    }
+    };
 
     return (
         <div>
-            <h1 className="text-2xl font-bold mb-4">Products (Admin)</h1>
-
+            <h1 className="text-2xl font-bold mb-4">Admin - Products</h1>
             <form onSubmit={createProduct} className="bg-white p-4 rounded shadow mb-6">
                 <div className="grid md:grid-cols-3 gap-3">
-                    <input required placeholder="Name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="p-2 border rounded" />
-                    <input required type="number" step="0.01" placeholder="Price" value={form.price} onChange={e => setForm({ ...form, price: parseFloat(e.target.value) })} className="p-2 border rounded" />
-                    <input required type="number" placeholder="Quantity" value={form.quantity} onChange={e => setForm({ ...form, quantity: parseInt(e.target.value || "0") })} className="p-2 border rounded" />
+                    <input required placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="p-2 border rounded" />
+                    <input required type="number" step="0.01" placeholder="Price" value={form.price} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} className="p-2 border rounded" />
+                    <input required type="number" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: parseInt(e.target.value || "0") })} className="p-2 border rounded" />
                 </div>
                 <div className="mt-3 flex justify-end">
-                    <button className="px-3 py-1 bg-indigo-600 text-white rounded">Create Product</button>
+                    <button className="px-3 py-1 bg-brand-500 text-white rounded">Create Product</button>
                 </div>
             </form>
 

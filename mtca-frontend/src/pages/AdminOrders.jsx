@@ -1,3 +1,4 @@
+// src/pages/AdminOrders.jsx
 import React, { useState } from "react";
 import api from "../api/axios";
 
@@ -11,8 +12,7 @@ export default function AdminOrders() {
             const res = await api.get(`/orders/code/${code}`);
             setOrder(res.data);
         } catch (e) {
-            console.error(e);
-            alert("Not found or error");
+            alert("Not found or error: " + (e.response?.data?.detail || e.message));
             setOrder(null);
         }
     };
@@ -20,25 +20,25 @@ export default function AdminOrders() {
     const fetchAll = async () => {
         try {
             const res = await api.get("/orders/?limit=50&offset=0");
-            setOrdersList(res.data);
+            setOrdersList(res.data || []);
         } catch (e) {
-            console.error(e);
-            alert("Failed to fetch");
+            alert("Failed to fetch orders");
         }
     };
 
     return (
         <div>
-            <h1 className="text-2xl font-bold mb-4">Orders (Admin)</h1>
+            <h1 className="text-2xl font-bold mb-4">Admin - Orders</h1>
 
             <div className="bg-white p-4 rounded shadow mb-4">
                 <div className="flex gap-2">
-                    <input className="p-2 border rounded" placeholder="Enter code like X7P9QZ" value={code} onChange={(e) => setCode(e.target.value)} />
-                    <button onClick={lookup} className="px-3 py-1 bg-indigo-600 text-white rounded">Lookup by code</button>
-                    <button onClick={fetchAll} className="px-3 py-1 border rounded">Fetch recent orders</button>
+                    <input placeholder="Code like X7P9QZ" value={code} onChange={e => setCode(e.target.value)} className="p-2 border rounded" />
+                    <button onClick={lookup} className="px-3 py-1 bg-brand-500 text-white rounded">Lookup</button>
+                    <button onClick={fetchAll} className="px-3 py-1 border rounded">Fetch recent</button>
                 </div>
+
                 {order && (
-                    <div className="mt-3 p-3 bg-indigo-50 rounded">
+                    <div className="mt-3 p-3 bg-brand-50 rounded">
                         <div className="font-semibold">Order #{order.id} — Code: {order.code}</div>
                         <div>Product ID: {order.product_id} — Quantity: {order.quantity}</div>
                     </div>
