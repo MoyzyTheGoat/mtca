@@ -13,8 +13,8 @@ export default function Navbar() {
                         Q
                     </div>
                     <div>
-                        <div className="text-lg font-semibold text-gray-800">QueueReducer</div>
-                        <div className="text-xs text-gray-500">Fast supermarket pickups</div>
+                        <div className="text-lg font-semibold text-gray-800">MTCA</div>
+                        <div className="text-xs text-gray-500">Fast Pickups</div>
                     </div>
                 </Link>
 
