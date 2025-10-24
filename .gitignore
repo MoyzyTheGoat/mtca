@@ -49,3 +49,6 @@ htmlcov/
 .pytype/    
 npm-debug.log*
 backendvenv/
+staticfiles/
+media/
+static/
