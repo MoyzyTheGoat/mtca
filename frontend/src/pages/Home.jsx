@@ -1,36 +1,50 @@
-import { motion } from "framer-motion";
+// src/pages/Home.jsx
+import React, { useEffect, useState } from "react";
+import api from "../api/axios";
+import ProductCard from "../components/ProductCard";
 
-const Home = () => {
+export default function Home() {
+    const [products, setProducts] = useState([]);
+
+    useEffect(() => { fetchProducts(); }, []);
+
+    const fetchProducts = async () => {
+        try {
+            const res = await api.get("/products/");
+            console.log(res.data); // inside fetchProducts
+
+            setProducts(res.data || []);
+        } catch (e) {
+            console.error(e);
+            alert("Cannot fetch products: " + (e.response?.data?.detail || e.message));
+        }
+    };
+
+
+
+    const addToCart = (product) => {
+        const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+        const existing = cart.find((c) => c.product_id === product.id);
+        if (existing) existing.quantity = Math.min(product.quantity, existing.quantity + 1);
+        else cart.push({ product_id: product.id, name: product.name, price: product.price, quantity: 1 });
+        localStorage.setItem("cart", JSON.stringify(cart));
+        // simple toast
+        const el = document.createElement("div");
+        el.textContent = `${product.name} added`;
+        Object.assign(el.style, { position: "fixed", right: "20px", bottom: "20px", background: "#111827", color: "white", padding: "8px 12px", borderRadius: "8px", zIndex: 9999 });
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 1400);
+    };
+
     return (
-        <div className="flex flex-col items-center justify-center text-center py-20">
-            <motion.h1
-                className="text-5xl font-bold text-indigo-700 mb-4"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6 }}
-            >
-                Welcome to MTCA Supermarket
-            </motion.h1>
+        <>
+            <div className="mb-8">
+                <h1 className="text-3xl font-bold">Products</h1>
+            </div>
 
-            <motion.p
-                className="text-lg text-gray-600 max-w-2xl mb-8"
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.8, delay: 0.2 }}
-            >
-                Skip the queue. Shop faster. Get your groceries ready for pickup.
-            </motion.p>
-
-            <motion.a
-                href="/products"
-                className="bg-indigo-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-indigo-700 transition-all"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-            >
-                Shop Now
-            </motion.a>
-        </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {products.map((p) => <ProductCard key={p.id} product={p} onAdd={addToCart} />)}
+            </div>
+        </>
     );
-};
-
-export default Home;
+}

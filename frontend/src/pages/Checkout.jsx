@@ -1,60 +1,80 @@
-import React, { useState, useEffect } from "react";
-import { createOrder } from "../api";
-
-/*
-This is a very simple checkout page:
-- The user manually composes order lines (for demo)
-- In a real app you'd store the cart centrally; here we allow the user to type
-  a JSON array or follow the simple form to create the order.
-*/
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "../api/axios";
 
 export default function Checkout() {
-    const [payloadText, setPayloadText] = useState('[{"product_id":1,"quantity":1}]');
-    const [result, setResult] = useState(null);
-    const [loading, setLoading] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const navigate = useNavigate();
 
-    async function handleCreate() {
-        setLoading(true);
+    const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+
+    const placeOrder = async () => {
+        setBusy(true);
+        setError("");
         try {
-            const payload = JSON.parse(payloadText);
-            const res = await createOrder(payload);
-            setResult(res);
-            alert(`Order created. Pickup code: ${res.code}`);
+            // ✅ FIXED: use product_id instead of id
+            const payload = cart.map((item) => ({
+                product_id: item.product_id,
+                quantity: item.quantity,
+            }));
+
+            const res = await api.post("/orders/", payload);
+            localStorage.removeItem("cart");
+
+            // ✅ res.data.code should match your backend Order schema
+            navigate(`/order/${res.data.code}`);
         } catch (err) {
-            alert("Error creating order: " + (err.message || err));
+            console.error(err);
+
+            // ✅ Avoid rendering raw objects
+            const msg =
+                err.response?.data?.detail?.[0]?.msg ||
+                (typeof err.response?.data?.detail === "string"
+                    ? err.response.data.detail
+                    : "Order failed");
+
+            setError(msg);
         } finally {
-            setLoading(false);
+            setBusy(false);
         }
+    };
+
+    if (!cart.length) {
+        return <div className="text-center text-gray-500 py-20">Cart is empty.</div>;
     }
 
+    const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
     return (
-        <div>
-            <h1 className="text-2xl mb-4">Checkout</h1>
+        <div className="max-w-3xl mx-auto bg-white p-6 rounded-xl shadow">
+            <h1 className="text-2xl font-bold mb-4">Checkout</h1>
 
-            <p className="mb-2 text-sm text-gray-600">
-                Provide the order payload as JSON: an array of {"{product_id, quantity}"}. Example pre-filled.
-            </p>
+            {cart.map((item) => (
+                <div key={item.product_id} className="flex justify-between py-2 border-b">
+                    <div>
+                        {item.name} × {item.quantity}
+                    </div>
+                    <div>₦{item.price * item.quantity}</div>
+                </div>
+            ))}
 
-            <textarea
-                rows="6"
-                className="w-full border p-2 rounded"
-                value={payloadText}
-                onChange={(e) => setPayloadText(e.target.value)}
-            />
-
-            <div className="mt-3">
-                <button onClick={handleCreate} disabled={loading} className="px-4 py-2 rounded bg-green-600 text-white">
-                    {loading ? "Creating..." : "Place order"}
-                </button>
+            <div className="flex justify-between font-semibold text-lg mt-4">
+                <span>Total:</span>
+                <span>₦{total}</span>
             </div>
 
-            {result && (
-                <div className="mt-4 p-3 border rounded bg-green-50">
-                    <div><strong>Order created</strong></div>
-                    <div>Order ID: {result.id}</div>
-                    <div>Pickup code: <code>{result.code}</code></div>
-                </div>
-            )}
+            {error && <p className="text-red-500 mt-2">{error}</p>}
+
+            <div className="mt-6 text-right">
+                <button
+                    disabled={busy}
+                    onClick={placeOrder}
+                    className="px-5 py-2 bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-60"
+                >
+                    {busy ? "Placing order..." : "Place Order"}
+                </button>
+            </div>
         </div>
     );
 }

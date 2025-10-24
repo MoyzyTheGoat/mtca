@@ -1,58 +1,98 @@
+// src/components/ProductCard.jsx
 import React, { useState } from "react";
 import { motion } from "framer-motion";
-import { ShoppingCart, Plus, Minus } from "lucide-react";
 
-export default function ProductCard({ product, onAdd }) {
-    const [qty, setQty] = useState(1);
+// Backend URL
+const BACKEND_URL = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
+
+export default function ProductCard({ product }) {
+    const [quantity, setQuantity] = useState(1);
+    const [added, setAdded] = useState(false);
+
+    const updateQty = (delta) => {
+        setQuantity((q) => Math.max(1, Math.min(product.quantity, q + delta)));
+    };
+
+    const addToCart = () => {
+        const cart = JSON.parse(localStorage.getItem("cart") || "[]");
+
+        const existing = cart.find((item) => item.product_id === product.id);
+        if (existing) {
+            existing.quantity = Math.min(product.quantity, existing.quantity + quantity);
+        } else {
+            cart.push({
+                product_id: product.id,
+                name: product.name,
+                price: product.price,
+                quantity,
+            });
+        }
+
+        localStorage.setItem("cart", JSON.stringify(cart));
+        setAdded(true);
+        setTimeout(() => setAdded(false), 2000);
+    };
+
+    // Determine image URL
+    const imageSrc = product.image_url
+        ? `${BACKEND_URL}/${product.image_url.replace(/^\/+/, "")}`
+        : "/placeholder.png";
+
+
 
     return (
-        <div className="bg-white rounded-2xl shadow-soft-xl border border-gray-100 overflow-hidden relative">
-            {/* Image Container */}
-            <div className="h-48 bg-gray-50 flex justify-center items-center overflow-hidden">
-                <motion.img
-                    src={product.image_url || "https://via.placeholder.com/400x300?text=No+Image"}
+        <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            whileHover={{ scale: 1.02 }}
+            className="bg-white shadow-md rounded-2xl overflow-hidden hover:shadow-xl transition-all duration-300"
+        >
+            <div className="relative">
+                <img
+                    src={imageSrc}
                     alt={product.name}
-                    className="object-cover h-full w-full transition-transform duration-500"
-                    whileHover={{ scale: 1.05 }} // Only image zooms
+                    className="h-48 w-full object-cover"
                 />
+
+
+                <span className="absolute top-2 right-2 bg-indigo-600 text-white text-xs px-2 py-1 rounded-full">
+                    ₦{product.price}
+                </span>
             </div>
 
-            {/* Card Content */}
-            <div className="p-4 flex flex-col h-48">
-                <h3 className="text-lg font-semibold text-gray-800 truncate">
-                    {product.name}
-                </h3>
-                <p className="text-gray-500 text-sm mt-1 line-clamp-2">
-                    {product.description || "No description provided"}
-                </p>
-                <p className="text-primary text-lg font-bold mt-auto">₦{product.price}</p>
+            <div className="p-4 flex flex-col justify-between h-52">
+                <div>
+                    <h2 className="font-semibold text-lg text-gray-800">{product.name}</h2>
+                    <p className="text-sm text-gray-500 line-clamp-2">{product.description}</p>
+                </div>
 
-                {/* Quantity + Add to Cart */}
                 <div className="mt-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center space-x-2">
                         <button
-                            onClick={() => setQty((q) => Math.max(1, q - 1))}
-                            className="p-1 rounded-full bg-gray-200 hover:bg-gray-300 transition"
+                            onClick={() => updateQty(-1)}
+                            className="w-7 h-7 flex items-center justify-center bg-gray-100 rounded-full hover:bg-gray-200 text-gray-700"
                         >
-                            <Minus size={14} />
+                            −
                         </button>
-                        <span className="font-medium">{qty}</span>
+                        <span className="text-sm font-medium w-6 text-center">{quantity}</span>
                         <button
-                            onClick={() => setQty((q) => q + 1)}
-                            className="p-1 rounded-full bg-gray-200 hover:bg-gray-300 transition"
+                            onClick={() => updateQty(1)}
+                            className="w-7 h-7 flex items-center justify-center bg-gray-100 rounded-full hover:bg-gray-200 text-gray-700"
                         >
-                            <Plus size={14} />
+                            +
                         </button>
                     </div>
+
                     <motion.button
-                        whileTap={{ scale: 0.9 }}
-                        onClick={() => onAdd(product, qty)}
-                        className="flex items-center gap-2 bg-primary text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors shadow"
+                        whileTap={{ scale: 0.95 }}
+                        onClick={addToCart}
+                        className={`px-4 py-1.5 rounded-lg text-sm font-semibold text-white ${added ? "bg-green-500" : "bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800"
+                            } transition-all`}
                     >
-                        <ShoppingCart size={16} /> Add
+                        {added ? "Added!" : "Add to Cart"}
                     </motion.button>
                 </div>
             </div>
-        </div>
+        </motion.div>
     );
 }
