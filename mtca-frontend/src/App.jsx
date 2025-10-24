@@ -1,6 +1,7 @@
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
+import Footer from "./components/Footer";
 
 import Home from "./pages/Home";
 import Cart from "./pages/Cart";
@@ -15,9 +16,9 @@ import AdminOrders from "./pages/AdminOrders";
 
 export default function App() {
   return (
-    <>
+    <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="container mx-auto p-4">
+      <div className="container flex-1 py-8">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/cart" element={<Cart />} />
@@ -30,7 +31,8 @@ export default function App() {
           <Route path="/admin/products" element={<AdminProducts />} />
           <Route path="/admin/orders" element={<AdminOrders />} />
         </Routes>
-      </main>
-    </>
+      </div>
+      <Footer />
+    </div>
   );
 }
