@@ -11,12 +11,16 @@ export default function Home() {
     const fetchProducts = async () => {
         try {
             const res = await api.get("/products/");
+            console.log(res.data); // inside fetchProducts
+
             setProducts(res.data || []);
         } catch (e) {
             console.error(e);
             alert("Cannot fetch products: " + (e.response?.data?.detail || e.message));
         }
     };
+
+
 
     const addToCart = (product) => {
         const cart = JSON.parse(localStorage.getItem("cart") || "[]");

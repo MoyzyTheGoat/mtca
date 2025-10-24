@@ -4,6 +4,7 @@ import secrets
 import string
 from passlib.context import CryptContext
 from passlib.exc import MissingBackendError
+from fastapi import Request
 
 # Use Argon2
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -20,9 +21,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-# PRODUCTS
-def create_product(db: Session, product: schemas.ProductCreate):
-    db_product = models.Product(**product.dict())
+def create_product(db: Session, product: schemas.ProductCreate, image_url: str = None):
+    db_product = models.Product(
+        name=product.name,
+        description=product.description,
+        price=product.price,
+        quantity=product.quantity,
+        image_url=image_url,  # ensure this is passed
+    )
     db.add(db_product)
     db.commit()
     db.refresh(db_product)
@@ -53,8 +59,16 @@ def update_product(db: Session, product_id: int, product: schemas.ProductUpdate)
     return db_product
 
 
-def get_all_products(db: Session, limit: int = 10, offset: int = 0):
-    return db.query(models.Product).limit(limit).offset(offset).all()
+def get_all_products(
+    db: Session, limit: int = 10, offset: int = 0, request: Request = None
+):
+    products = db.query(models.Product).limit(limit).offset(offset).all()
+    if request:
+        base_url = str(request.base_url).rstrip("/")
+        for p in products:
+            if p.image_url and not p.image_url.startswith("http"):
+                p.image_url = f"{base_url}{p.image_url}"
+    return products
 
 
 # ORDERS

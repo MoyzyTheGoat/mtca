@@ -6,11 +6,16 @@ from typing import Optional, List
 class ProductBase(BaseModel):
     name: str
     price: float
+    description: str = ""
     quantity: int
+    image_url: Optional[str] = None
 
 
 class ProductCreate(ProductBase):
-    pass
+    name: str
+    price: float
+    description: str = ""  # default empty string if optional
+    image_url: str = ""  # optional if you handle image upload separately
 
 
 class ProductUpdate(BaseModel):

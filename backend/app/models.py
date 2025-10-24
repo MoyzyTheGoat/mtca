@@ -10,6 +10,8 @@ class Product(Base):
     name = Column(String, index=True)
     price = Column(Float)
     quantity = Column(Integer)
+    image_url = Column(String, nullable=True)
+    description = Column(String, default="")
     orders = relationship("Order", back_populates="product")
 
 

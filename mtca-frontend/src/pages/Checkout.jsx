@@ -13,18 +13,28 @@ export default function Checkout() {
         setBusy(true);
         setError("");
         try {
+            // ✅ FIXED: use product_id instead of id
             const payload = cart.map((item) => ({
-                product_id: item.id,
+                product_id: item.product_id,
                 quantity: item.quantity,
             }));
+
             const res = await api.post("/orders/", payload);
             localStorage.removeItem("cart");
 
-            // Navigate to order code page with the generated code
+            // ✅ res.data.code should match your backend Order schema
             navigate(`/order/${res.data.code}`);
         } catch (err) {
-            setError(err.response?.data?.detail || "Order failed");
             console.error(err);
+
+            // ✅ Avoid rendering raw objects
+            const msg =
+                err.response?.data?.detail?.[0]?.msg ||
+                (typeof err.response?.data?.detail === "string"
+                    ? err.response.data.detail
+                    : "Order failed");
+
+            setError(msg);
         } finally {
             setBusy(false);
         }
@@ -41,7 +51,7 @@ export default function Checkout() {
             <h1 className="text-2xl font-bold mb-4">Checkout</h1>
 
             {cart.map((item) => (
-                <div key={item.id} className="flex justify-between py-2 border-b">
+                <div key={item.product_id} className="flex justify-between py-2 border-b">
                     <div>
                         {item.name} × {item.quantity}
                     </div>
@@ -60,7 +70,7 @@ export default function Checkout() {
                 <button
                     disabled={busy}
                     onClick={placeOrder}
-                    className="px-5 py-2 bg-brand-500 text-white rounded hover:bg-brand-600"
+                    className="px-5 py-2 bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-60"
                 >
                     {busy ? "Placing order..." : "Place Order"}
                 </button>
