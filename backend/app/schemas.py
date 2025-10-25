@@ -22,6 +22,8 @@ class ProductUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
     quantity: Optional[int] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class Product(ProductBase):
@@ -43,6 +45,11 @@ class OrderCreate(BaseModel):
         return v
 
 
+class OrderResponse(BaseModel):
+    message: str
+    code: str
+
+
 class OrderUpdate(BaseModel):
     product_id: Optional[int] = None
     quantity: Optional[int] = None
@@ -53,6 +60,7 @@ class Order(BaseModel):
     product_id: int
     quantity: int
     code: str
+    collected: bool
 
     class Config:
         orm_mode = True

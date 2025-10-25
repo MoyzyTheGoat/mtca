@@ -1,78 +1,112 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from .. import crud, schemas, auth, models  # 👈 notice the two dots (relative import)
+from .. import crud, schemas, auth, models
 from ..database import get_db
 import os
 import shutil
-import re
-
+import uuid
 
 router = APIRouter(tags=["products"])
 
-
-UPLOAD_DIR = "app/static/images"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# Mount static only once (usually done in main.py)
-# app.mount("/static", StaticFiles(directory="app/static"), name="static")
+# === Directories ===
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATIC_DIR = os.path.join(BASE_DIR, "static", "images")
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 
-@router.post("/products/", response_model=schemas.Product)
+# ==============================
+# 🟩 CREATE PRODUCT
+# ==============================
+@router.post("/", response_model=schemas.Product)
 async def create_product(
     name: str = Form(...),
     price: float = Form(...),
-    description: str = Form(""),
-    quantity: int = Form(...),
-    image: UploadFile | None = File(None),
+    quantity: int = Form(0),
+    description: str = Form(...),
+    image: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(auth.get_current_admin),
 ):
-    image_url = None
+    # ✅ generate unique filename
+    ext = os.path.splitext(image.filename)[1]
+    filename = f"{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(STATIC_DIR, filename)
 
-    if image:
-        os.makedirs("static/images", exist_ok=True)
-        safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", image.filename)
-        filename = f"static/images/{safe_name}"
-        with open(filename, "wb") as f:
-            f.write(await image.read())
-        image_url = f"/{filename}"
+    # ✅ save file
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(image.file, buffer)
 
-    # Create Product object
-    product_data = schemas.ProductCreate(
+    # ✅ save product entry
+    image_url = f"/static/images/{filename}"
+    new_product = models.Product(
         name=name,
         price=price,
-        description=description,
         quantity=quantity,
-        image_url=image_url or "",
+        description=description,
+        image_url=image_url,
     )
+    db.add(new_product)
+    db.commit()
+    db.refresh(new_product)
+    return new_product
 
-    db_product = crud.create_product(db, product_data, image_url=image_url)
-    return db_product
 
-
-@router.get("/products/", response_model=list[schemas.Product])
+# ==============================
+# 🟩 READ PRODUCTS
+# ==============================
+@router.get("/", response_model=list[schemas.Product])
 def read_products(db: Session = Depends(get_db), limit: int = 10, offset: int = 0):
     return crud.get_all_products(db, limit=limit, offset=offset, request=None)
 
 
-@router.put("/products/{product_id}", response_model=schemas.Product)
-def update_product(
+# ==============================
+# 🟩 UPDATE PRODUCT
+# ==============================
+@router.put("/{product_id}", response_model=schemas.Product)
+async def update_product(
     product_id: int,
-    product: schemas.ProductUpdate,
+    name: str = Form(...),
+    price: float = Form(...),
+    quantity: int = Form(...),
+    description: str = Form(...),
+    image: UploadFile | None = File(None),
     db: Session = Depends(get_db),
-    current_user=Depends(auth.get_current_admin),
+    current_admin: models.User = Depends(auth.get_current_admin),
 ):
-    db_product = crud.update_product(db, product_id, product)
-    if db_product is None:
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
+    if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return db_product
+
+    # ✅ update basic fields
+    product.name = name
+    product.price = price
+    product.quantity = quantity
+    product.description = description
+
+    # ✅ if new image uploaded, replace it
+    if image:
+        ext = os.path.splitext(image.filename)[1]
+        filename = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join(STATIC_DIR, filename)
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(image.file, buffer)
+
+        product.image_url = f"/static/images/{filename}"
+
+    db.commit()
+    db.refresh(product)
+    return product
 
 
-@router.delete("/products/{product_id}", response_model=schemas.Product)
+# ==============================
+# 🟩 DELETE PRODUCT
+# ==============================
+@router.delete("/{product_id}", response_model=schemas.Product)
 def delete_product(
     product_id: int,
     db: Session = Depends(get_db),
-    current_user=Depends(auth.get_current_admin),
+    current_admin=Depends(auth.get_current_admin),
 ):
     db_product = crud.delete_product(db, product_id)
     if db_product is None:
@@ -80,6 +114,9 @@ def delete_product(
     return db_product
 
 
+# ==============================
+# 🟩 GET SINGLE PRODUCT
+# ==============================
 @router.get("/{product_id}", response_model=schemas.Product)
 def get_product(product_id: int, db: Session = Depends(get_db)):
     product = crud.get_product(db, product_id)
@@ -88,26 +125,29 @@ def get_product(product_id: int, db: Session = Depends(get_db)):
     return product
 
 
-@router.post("/products/{product_id}/upload-image/", response_model=schemas.Product)
+# ==============================
+# 🟩 UPLOAD IMAGE SEPARATELY (optional)
+# ==============================
+@router.post("/{product_id}/upload-image/", response_model=schemas.Product)
 def upload_product_image(
     product_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user=Depends(auth.get_current_admin),
+    current_admin=Depends(auth.get_current_admin),
 ):
     product = crud.get_product(db, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    upload_dir = "static/images/"
-    os.makedirs(upload_dir, exist_ok=True)
-    file_location = os.path.join(upload_dir, f"product_{product_id}_{file.filename}")
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{uuid.uuid4().hex}{ext}"
+    file_path = os.path.join(STATIC_DIR, filename)
 
-    with open(file_location, "wb") as buffer:
+    with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    product.image_url = file_location
+    product.image_url = f"/static/images/{filename}"
+
     db.commit()
     db.refresh(product)
-
     return product

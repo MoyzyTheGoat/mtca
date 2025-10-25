@@ -5,6 +5,9 @@ import string
 from passlib.context import CryptContext
 from passlib.exc import MissingBackendError
 from fastapi import Request
+from sqlalchemy.exc import IntegrityError
+import random
+from sqlalchemy import func
 
 # Use Argon2
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -72,10 +75,33 @@ def get_all_products(
 
 
 # ORDERS
-def create_order(db: Session, order: list[schemas.OrderCreate]):
-    for item in order:
+def generate_unique_code(db: Session, length: int = 6) -> str:
+    while True:
+        code = "".join(
+            secrets.choice(string.ascii_uppercase + string.digits)
+            for _ in range(length)
+        ).upper()
+        # case-insensitive guard
+        if (
+            not db.query(models.Order)
+            .filter(func.upper(models.Order.code) == code)
+            .first()
+        ):
+            return code
+
+
+def create_order(db: Session, order_items: list[schemas.OrderCreate]):
+    if not order_items:
+        raise ValueError("Order list cannot be empty")
+
+    # generate one shared code for this entire checkout
+    code_str = generate_unique_code(db)
+
+    created_orders = []
+    for item in order_items:
         if isinstance(item, dict):
             item = schemas.OrderCreate(**item)
+
         product = (
             db.query(models.Product)
             .filter(models.Product.id == item.product_id)
@@ -84,32 +110,29 @@ def create_order(db: Session, order: list[schemas.OrderCreate]):
         if not product:
             raise ValueError(f"Product with ID {item.product_id} does not exist")
 
-        db_order = models.Order(**item.dict())
-        # generate unique 6-character alphanumeric code
-        code_str = "".join(
-            secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
-        )
-        # ensure code uniqueness (simple loop)
-        while db.query(models.Order).filter(models.Order.code == code_str).first():
-            code_str = "".join(
-                secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
-            )
-        db_order.code = code_str
+        db_order = models.Order(**item.dict(), code=code_str)
         db.add(db_order)
-        db.commit()
-        return db_order
+        created_orders.append(db_order)
 
-    # ensure code uniqueness (simple loop)
-    while db.query(models.Order).filter(models.Order.code == code_str).first():
-        code_str = "".join(
-            secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6)
-        )
-
-    db_order.code = code_str
-    db.add(db_order)
+    # single commit for the whole order
     db.commit()
-    db.refresh(db_order)
-    return db_order
+    for o in created_orders:
+        db.refresh(o)
+
+    # return the pickup code and created items (explicitly serializable)
+    return {
+        "message": "Order created successfully",
+        "code": code_str,
+        "orders": [
+            {
+                "id": o.id,
+                "product_id": o.product_id,
+                "quantity": o.quantity,
+                "code": o.code,
+            }
+            for o in created_orders
+        ],
+    }
 
 
 def update_order(db: Session, order_id: int, order: schemas.OrderUpdate):
@@ -137,7 +160,11 @@ def delete_order(db: Session, order_id: int):
 
 
 def get_order_by_code(db: Session, code: str):
-    return db.query(models.Order).filter(models.Order.code == code).first()
+    return (
+        db.query(models.Order)
+        .filter(func.upper(models.Order.code) == code.upper())
+        .all()
+    )
 
 
 # USERS
@@ -171,3 +198,39 @@ def get_product(db: Session, product_id: int):
 
 def get_order(db: Session, order_id: int):
     return db.query(models.Order).filter(models.Order.id == order_id).first()
+
+
+def mark_orders_collected_by_code(db: Session, code: str):
+    """Mark all order rows that have this code as collected.
+    Returns list of updated Order ORM objects.
+    """
+    rows = db.query(models.Order).filter(models.Order.code == code).all()
+    if not rows:
+        return []
+    # if any row already collected -> return rows and indicate already collected
+    already = all(r.collected for r in rows)
+    if already:
+        raise ValueError("Order code already collected")
+
+    for r in rows:
+        r.collected = True
+        db.add(r)
+    db.commit()
+    # refresh and return
+    for r in rows:
+        db.refresh(r)
+    return rows
+
+
+def mark_order_collected_by_id(db: Session, order_id: int):
+    """Mark a single order row collected by its id."""
+    r = db.query(models.Order).filter(models.Order.id == order_id).first()
+    if not r:
+        return None
+    if r.collected:
+        raise ValueError("Order already collected")
+    r.collected = True
+    db.add(r)
+    db.commit()
+    db.refresh(r)
+    return r
