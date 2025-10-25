@@ -15,13 +15,11 @@ os.makedirs(IMAGES_DIR, exist_ok=True)
 
 @router.get("/", response_model=list[schemas.ProductResponse])
 def list_products(db: Session = Depends(get_db)):
-    """List all products (public)."""
     return crud.get_all_products(db)
 
 
 @router.get("/{product_id}", response_model=schemas.ProductResponse)
 def get_product(product_id: int, db: Session = Depends(get_db)):
-    """Get a single product by ID (public)."""
     product = crud.get_product(db, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -41,7 +39,6 @@ async def create_product(
     image: UploadFile = File(None),
     db: Session = Depends(get_db),
 ):
-    """Create a new product (admin only)."""
     image_url = None
     if image:
         # Save to the same static/images directory used in main.py
@@ -70,7 +67,6 @@ async def create_product(
 def update_product(
     product_id: int, product: schemas.ProductUpdate, db: Session = Depends(get_db)
 ):
-    """Update a product (admin only)."""
     updated = crud.update_product(db, product_id, product)
     if not updated:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -83,7 +79,6 @@ def update_product(
     dependencies=[Depends(auth.get_current_admin)],
 )
 def delete_product(product_id: int, db: Session = Depends(get_db)):
-    """Delete a product (admin only)."""
     deleted = crud.delete_product(db, product_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Product not found")

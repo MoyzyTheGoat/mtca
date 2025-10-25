@@ -3,7 +3,6 @@ from pydantic import BaseModel, validator
 from typing import Optional, List
 
 
-# Product schemas
 class ProductBase(BaseModel):
     name: str
     price: float
@@ -13,7 +12,6 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    # Image is uploaded via form-data, so not included here
     pass
 
 
@@ -32,7 +30,6 @@ class ProductResponse(ProductBase):
         orm_mode = True
 
 
-# Order schemas
 class OrderCreate(BaseModel):
     product_id: int
     quantity: int
@@ -64,7 +61,6 @@ class OrderResponse(OrderDetail):
     pass
 
 
-# User schemas
 class UserCreate(BaseModel):
     username: str
     password: str
@@ -80,7 +76,6 @@ class UserResponse(BaseModel):
         orm_mode = True
 
 
-# Token schemas
 class TokenRefreshRequest(BaseModel):
     refresh_token: str
 

@@ -42,5 +42,4 @@ class Order(Base):
     collected = Column(Boolean, default=False, nullable=False)
     total_amount = Column(Float, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
     product = relationship("Product", back_populates="orders")

@@ -23,7 +23,6 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ):
-    """Authenticate user and return JWT tokens."""
     user = crud.authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -38,7 +37,6 @@ def login(
 
 @router.post("/refresh", response_model=schemas.LoginResponse)
 def refresh_token(req: schemas.TokenRefreshRequest):
-    """Refresh JWT tokens."""
     try:
         payload = jwt.decode(
             req.refresh_token, auth.SECRET_KEY, algorithms=[auth.ALGORITHM]
@@ -59,7 +57,6 @@ def refresh_token(req: schemas.TokenRefreshRequest):
 
 @router.get("/users/me", response_model=schemas.UserResponse)
 def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
-    """Return details of the currently logged-in user."""
     if not current_user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

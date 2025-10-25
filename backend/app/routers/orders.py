@@ -21,7 +21,6 @@ def create_orders_endpoint(
     orders: List[schemas.OrderCreate] = Body(...),
     db: Session = Depends(get_db),
 ):
-    """Create an order containing one or more products."""
     return crud.create_orders(db, orders)
 
 
@@ -37,6 +36,5 @@ def read_order_by_code(code: str, db: Session = Depends(get_db)):
 
 @router.patch("/{code}", dependencies=[Depends(auth.get_current_admin)])
 def mark_order_collected(code: str, db: Session = Depends(get_db)):
-    """Mark orders as collected by code (admin only)."""
     crud.mark_orders_collected_by_code(db, code)
     return {"message": f"Orders with code {code} marked as collected"}

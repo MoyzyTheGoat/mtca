@@ -10,29 +10,24 @@ from . import models
 from .routers import users, products, orders, stats
 
 load_dotenv()
-app = FastAPI(title="Grocery Nexus API")
+app = FastAPI(title="MTCA API")
 
 
-# Base directory (this file's parent folder)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Static directory one level above backend/
+
 STATIC_DIR = os.path.join(BASE_DIR, "..", "static")
 
-# Make sure the folder exists
+
 os.makedirs(os.path.join(STATIC_DIR, "images"), exist_ok=True)
 
-# Mount static
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-print("Static directory mounted at:", os.path.abspath(STATIC_DIR))
 
-
-# Create database tables
 Base.metadata.create_all(bind=engine)
 
 
-# Seed admin user if not present
 @app.on_event("startup")
 def seed_admin():
     from .database import SessionLocal
@@ -52,13 +47,12 @@ def seed_admin():
         db.close()
 
 
-# Include routers
 app.include_router(users.router, tags=["users"])
 app.include_router(products.router, prefix="/products", tags=["products"])
 app.include_router(orders.router, prefix="/orders", tags=["orders"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
 
-# CORS setup (allow React frontend)
+
 origins = [
     "http://localhost:8080",
     "http://127.0.0.1:8080",

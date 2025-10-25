@@ -17,12 +17,9 @@ def get_order_stats(
     start_date: str = Query(None),
     end_date: str = Query(None),
 ):
-    """Return order statistics with optional date range filtering and top-selling products."""
     query = db.query(models.Order).filter(models.Order.collected == True)
 
     now = datetime.utcnow()
-
-    # Handle date filters
     if range == "day":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         query = query.filter(models.Order.created_at >= start)
@@ -44,8 +41,6 @@ def get_order_stats(
             )
         except ValueError:
             return {"error": "Invalid date format. Use YYYY-MM-DD."}
-
-    # === Existing calculations ===
     total_orders = query.count()
     total_revenue = (
         query.with_entities(func.sum(models.Order.total_amount)).scalar() or 0
@@ -61,7 +56,6 @@ def get_order_stats(
         .all()
     )
 
-    # === 🆕 Top Selling Products ===
     top_products = (
         db.query(
             models.Product.name,

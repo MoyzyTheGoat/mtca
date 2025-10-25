@@ -18,7 +18,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
 
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
-    """Generate a JWT access token."""
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -29,7 +28,6 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
 
 
 def create_refresh_token(data: dict):
-    """Generate a JWT refresh token (longer expiry)."""
     expire = datetime.now(timezone.utc) + timedelta(days=7)
     to_encode = data.copy()
     to_encode.update({"exp": expire})
@@ -39,7 +37,6 @@ def create_refresh_token(data: dict):
 def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ):
-    """Dependency to get the currently authenticated user."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -59,7 +56,6 @@ def get_current_user(
 
 
 def get_current_admin(current_user: models.User = Depends(get_current_user)):
-    """Dependency to ensure the user is an admin."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins only")
     return current_user
