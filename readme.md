@@ -43,7 +43,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` to access the full site.
+Open `http://localhost:8080` to access the full site.
 
 ---
 
