@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 import shutil, os
 from .. import crud, schemas, auth
 from ..database import get_db
+from fastapi import Body
+
 
 router = APIRouter(tags=["Products"])
 
@@ -59,27 +61,61 @@ async def create_product(
     return product
 
 
-@router.put(
+@router.patch(
     "/{product_id}",
     response_model=schemas.ProductResponse,
     dependencies=[Depends(auth.get_current_admin)],
 )
-def update_product(
-    product_id: int, product: schemas.ProductUpdate, db: Session = Depends(get_db)
+def update_product_endpoint(
+    product_id: int,
+    update_data: schemas.ProductUpdate = Body(...),
+    db: Session = Depends(get_db),
 ):
-    updated = crud.update_product(db, product_id, product)
-    if not updated:
+    """
+    Update product fields. All fields are optional in ProductUpdate.
+    Requires admin.
+    """
+    product = crud.update_product(db, product_id, update_data)
+    if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return updated
+    return product
 
 
-@router.delete(
-    "/{product_id}",
+@router.patch(
+    "/{product_id}/image",
     response_model=schemas.ProductResponse,
     dependencies=[Depends(auth.get_current_admin)],
 )
-def delete_product(product_id: int, db: Session = Depends(get_db)):
-    deleted = crud.delete_product(db, product_id)
-    if not deleted:
+def update_product_image(
+    product_id: int,
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    # implement file save logic (e.g. write to /static/uploads/ and set product.image_url)
+    product = crud.get_product(db, product_id)
+    if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return deleted
+
+    # example saving - adjust path and URL composition to your app
+    filename = f"/uploads/{product_id}-{image.filename}"
+    with open(f"./static{filename}", "wb") as f:
+        f.write(image.file.read())
+
+    product.image_url = filename
+    db.commit()
+    db.refresh(product)
+    return product
+
+
+@router.delete("/{product_id}", dependencies=[Depends(auth.get_current_admin)])
+def delete_product_endpoint(product_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a product (admin only).
+    Returns a simple JSON message on success, 404 if not found.
+    """
+    product = crud.delete_product(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Product not found"
+        )
+    return {"message": "Product deleted"}

@@ -1,6 +1,7 @@
+// src/pages/AdminDashboard.tsx
 import { useState, useEffect, useMemo } from "react";
 import api from "@/api/axios";
-import { Product, OrderDetail } from "@/types";
+import { Product as BaseProduct, OrderDetail } from "@/types";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { RefreshCw, CheckCircle2, Package } from "lucide-react";
+import { RefreshCw, CheckCircle2, Package, Search, X } from "lucide-react";
 import { toast } from "sonner";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -32,6 +33,12 @@ type StatsResponse = {
   top_products: TopProduct[];
 };
 
+// Extend the Product type locally to include fields you reference in UI
+interface Product extends BaseProduct {
+  quantity?: number;
+  image_url?: string;
+}
+
 const AdminDashboard = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [allOrders, setAllOrders] = useState<OrderDetail[]>([]);
@@ -52,12 +59,27 @@ const AdminDashboard = () => {
   const [updatingOrderCode, setUpdatingOrderCode] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("products");
 
+  // Edit product state
+  const [editingProductId, setEditingProductId] = useState<number | null>(null);
+  const [editingProduct, setEditingProduct] = useState<
+    Partial<Product & { price: string; quantity: string }> | null
+  >(null);
+  const [isUpdatingProduct, setIsUpdatingProduct] = useState(false);
+
+  // Delete product state (track which product is being deleted)
+  const [deletingProductId, setDeletingProductId] = useState<number | null>(null);
+
+  // Product search state
+  const [productQuery, setProductQuery] = useState<string>("");
+
   // Stats state
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [isLoadingStats, setIsLoadingStats] = useState(true);
 
   // Query control state
-  const [range, setRange] = useState<"day" | "week" | "month" | "year" | "custom" | "">("");
+  const [range, setRange] = useState<
+    "day" | "week" | "month" | "year" | "custom" | ""
+  >("");
   const [startDate, setStartDate] = useState<string>(""); // YYYY-MM-DD
   const [endDate, setEndDate] = useState<string>(""); // YYYY-MM-DD
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
@@ -75,9 +97,7 @@ const AdminDashboard = () => {
     }
 
     if (activeTab === "stats") {
-      // when entering stats, fetch current stats with current filters
       fetchStats();
-      // refresh stats every 30s while on stats tab
       interval = window.setInterval(() => fetchStats(), 30000);
     }
 
@@ -87,11 +107,14 @@ const AdminDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  // ---------- Fetchers ----------
   const fetchProducts = async () => {
+    setIsLoadingProducts(true);
     try {
       const response = await api.get<Product[]>("/products/");
       setProducts(response.data);
     } catch (error) {
+      console.error("Failed to load products", error);
       toast.error("Failed to load products");
     } finally {
       setIsLoadingProducts(false);
@@ -111,65 +134,33 @@ const AdminDashboard = () => {
     }
   };
 
-  /**
-   * Fetch stats from backend using current query control values.
-   * - If range is set to day/week/month/year -> pass range param
-   * - If range === 'custom' -> require startDate and endDate, pass start_date and end_date
-   */
   const fetchStats = async () => {
     setIsLoadingStats(true);
     try {
       const params: Record<string, string> = {};
-      if (range && range !== "") {
-        params.range = range;
-      }
+      if (range && range !== "") params.range = range;
       if (range === "custom") {
         if (!startDate || !endDate) {
-          // if custom but missing dates, don't call and show message instead
           toast.error("Please provide a start and end date for custom range.");
           setIsLoadingStats(false);
           return;
         }
-        // backend expects ISO-like input; YYYY-MM-DD is accepted by datetime.fromisoformat
         params.start_date = startDate;
         params.end_date = endDate;
       }
-
-      const response = await api.get<StatsResponse>("/stats/", { params });
+      // use /stats without a trailing slash if your backend prefers that
+      const response = await api.get<StatsResponse>("/stats", { params });
       setStats(response.data);
     } catch (error: any) {
       console.error("Failed to load stats:", error);
-      toast.error(
-        error?.response?.data?.detail || "Failed to load statistics. Ensure the /stats/ endpoint exists and auth is set."
-      );
+      toast.error(error?.response?.data?.detail || "Failed to load statistics.");
       setStats(null);
     } finally {
       setIsLoadingStats(false);
     }
   };
 
-  const applyFilters = async () => {
-    // apply current UI filters to stats
-    setIsApplyingFilters(true);
-    try {
-      if (range === "custom") {
-        if (!startDate || !endDate) {
-          toast.error("Please enter both start and end dates for custom range.");
-          return;
-        }
-        // basic validation: start <= end
-        if (new Date(startDate) > new Date(endDate)) {
-          toast.error("Start date cannot be after end date.");
-          return;
-        }
-      }
-      await fetchStats();
-      toast.success("Filters applied");
-    } finally {
-      setIsApplyingFilters(false);
-    }
-  };
-
+  // ---------- Product create ----------
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsCreating(true);
@@ -211,6 +202,7 @@ const AdminDashboard = () => {
     }
   };
 
+  // ---------- Search order ----------
   const handleSearchOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!orderCode.trim()) {
@@ -230,6 +222,7 @@ const AdminDashboard = () => {
     }
   };
 
+  // ---------- Mark collected ----------
   const handleMarkAsCollected = async (code: string) => {
     setUpdatingOrderCode(code);
     try {
@@ -241,23 +234,90 @@ const AdminDashboard = () => {
         const refreshed = await api.get<OrderDetail>(`/orders/${code}`);
         setOrder(refreshed.data);
       }
-      // refresh stats as collected orders affect stats
       await fetchStats();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to update order");
+      toast.error(error?.response?.data?.detail || "Failed to update order");
     } finally {
       setUpdatingOrderCode(null);
     }
   };
 
-  /**
-   * Derive grouped orders from flat allOrders list.
-   * Each group:
-   *  - code: string
-   *  - items: flattened items array from all rows with that code
-   *  - total: computed from items (price * qty) when possible, otherwise fallback to sum of row totals
-   *  - collected: true if every row for that code is collected
-   */
+  // ---------- Product edit handlers ----------
+  const startEditProduct = (product: Product) => {
+    setEditingProductId(product.id);
+    setEditingProduct({
+      name: product.name,
+      price: String(product.price ?? ""),
+      description: (product as any).description ?? "",
+      quantity: String((product as any).quantity ?? 0),
+    });
+  };
+
+  const cancelEditProduct = () => {
+    setEditingProductId(null);
+    setEditingProduct(null);
+  };
+
+  const handleUpdateProduct = async (productId: number) => {
+    if (!editingProduct) return;
+    setIsUpdatingProduct(true);
+    try {
+      const payload: any = {};
+      if (editingProduct.name !== undefined) payload.name = (editingProduct.name as string).trim();
+      if (editingProduct.price !== undefined && editingProduct.price !== "") payload.price = Number(editingProduct.price);
+      if (editingProduct.description !== undefined) payload.description = editingProduct.description;
+      if (editingProduct.quantity !== undefined && editingProduct.quantity !== "") payload.quantity = Number(editingProduct.quantity);
+
+      const res = await api.patch<Product>(`/products/${productId}`, payload);
+
+      // update local list
+      setProducts((prev) => prev.map((p) => (p.id === productId ? res.data : p)));
+      toast.success("Product updated");
+      cancelEditProduct();
+    } catch (err: any) {
+      console.error("Update failed", err);
+      toast.error(err?.response?.data?.detail || "Failed to update product");
+    } finally {
+      setIsUpdatingProduct(false);
+    }
+  };
+
+  // ---------- Delete product handler ----------
+  const handleDeleteProduct = async (productId: number) => {
+    const product = products.find((p) => p.id === productId);
+    const confirmMsg = product
+      ? `Delete "${product.name}" permanently? This cannot be undone.`
+      : "Delete this product permanently?";
+    const ok = window.confirm(confirmMsg);
+    if (!ok) return;
+
+    setDeletingProductId(productId);
+    try {
+      await api.delete(`/products/${productId}`);
+      // optimistic update
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      toast.success("Product deleted");
+    } catch (err: any) {
+      console.error("Delete failed", err);
+      toast.error(err?.response?.data?.detail || "Failed to delete product");
+    } finally {
+      setDeletingProductId(null);
+    }
+  };
+
+  // ---------- Product filtering (search) ----------
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return products;
+    return products.filter((p) => {
+      const name = (p.name || "").toLowerCase();
+      const desc = ((p as any).description || "").toLowerCase();
+      const idStr = String(p.id || "");
+      return name.includes(q) || desc.includes(q) || idStr.includes(q);
+    });
+  }, [products, productQuery]);
+
+  // ---------- Grouping orders for admin view ----------
   const groupedOrders = useMemo(() => {
     const map = allOrders.reduce((acc, ord) => {
       const code = ord.code || "UNKNOWN";
@@ -266,11 +326,9 @@ const AdminDashboard = () => {
       return acc;
     }, {} as Record<string, OrderDetail[]>);
 
-    const groups = Object.entries(map).map(([code, orders]) => {
-      // flatten items
+    return Object.entries(map).map(([code, orders]) => {
       const items = orders.flatMap((o) => o.items ?? []);
-
-      // try compute total from item prices if available
+      // compute total if prices exist
       let totalFromItems = 0;
       let hasItemPrices = false;
       for (const it of items) {
@@ -281,26 +339,24 @@ const AdminDashboard = () => {
           totalFromItems += p * (isNaN(q) ? 0 : q);
         }
       }
-
-      // fallback: sum row totals (some APIs return total on each row)
       const totalFromRows = orders.reduce((sum, o) => sum + (Number((o as any).total) || 0), 0);
-
       const total = hasItemPrices ? totalFromItems : totalFromRows;
+      const collected = orders.every((o) => !!(o as any).collected);
 
-      const collected = orders.every((o) => !!o.collected);
+      // find username if available
+      let username: string | null = null;
+      const rowWithUser = orders.find((o) => (o as any).user && (o as any).user.username);
+      if (rowWithUser) username = (rowWithUser as any).user.username;
+      else if ((orders[0] as any).user && (orders[0] as any).user.username) username = (orders[0] as any).user.username;
 
-      // Optional: dedupe items by product_name and sum quantities (if you want compact list)
-      // For now keep items as-is order-preserving.
       return {
         code,
         items,
         total: Number(total || 0),
         collected,
+        user: username,
       };
     });
-
-    // sort newest first if your orders include created_at in nested rows (not assumed here)
-    return groups;
   }, [allOrders]);
 
   return (
@@ -392,9 +448,37 @@ const AdminDashboard = () => {
             </Card>
 
             <Card>
-              <CardHeader>
-                <CardTitle>All Products ({products.length})</CardTitle>
+              <CardHeader className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <CardTitle>All Products ({products.length})</CardTitle>
+                </div>
+
+                {/* Search box in header */}
+                <div className="flex items-center gap-2 w-full md:w-1/2">
+                  <div className="relative w-full">
+                    <Input
+                      placeholder="Search products by name, description or id..."
+                      value={productQuery}
+                      onChange={(e) => setProductQuery(e.target.value)}
+                      aria-label="Search products"
+                      className="pr-10"
+                    // keep it visually prominent
+                    />
+                    <Search className="absolute right-8 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    {productQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setProductQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-4 w-4 text-muted-foreground" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </CardHeader>
+
               <CardContent>
                 {isLoadingProducts ? (
                   <div className="flex justify-center py-8">
@@ -403,33 +487,107 @@ const AdminDashboard = () => {
                 ) : products.length === 0 ? (
                   <p className="py-8 text-center text-muted-foreground">No products yet</p>
                 ) : (
-                  <div className="space-y-3">
-                    {products.map((product) => (
-                      <div
-                        key={product.id}
-                        className="flex items-center justify-between rounded-lg border p-4"
-                      >
-                        <div className="flex items-center gap-4">
-                          {product.image_url && (
-                            <img
-                              src={`${API_BASE_URL}${product.image_url}`}
-                              alt={product.name}
-                              className="h-16 w-16 rounded object-cover border"
-                            />
+                  <>
+                    {/* show filtered count and query */}
+                    {productQuery.trim() !== "" && (
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Showing {filteredProducts.length} of {products.length} products for "<span className="font-medium text-foreground">{productQuery}</span>"
+                      </p>
+                    )}
+
+                    <div className="space-y-3">
+                      {filteredProducts.map((product) => (
+                        <div key={product.id} className="rounded-lg border p-4">
+                          {editingProductId === product.id && editingProduct ? (
+                            <div className="space-y-3">
+                              <div className="flex justify-between items-start">
+                                <div className="flex items-center gap-4 w-full">
+                                  {product.image_url && (
+                                    <img
+                                      src={`${API_BASE_URL}${product.image_url}`}
+                                      alt={product.name}
+                                      className="h-16 w-16 rounded object-cover border"
+                                    />
+                                  )}
+                                  <div className="w-full">
+                                    <input
+                                      className="w-full border rounded-md px-2 py-1"
+                                      value={editingProduct.name as string}
+                                      onChange={(e) => setEditingProduct({ ...editingProduct, name: e.target.value })}
+                                    />
+                                    <textarea
+                                      className="w-full mt-2 border rounded-md px-2 py-1"
+                                      rows={2}
+                                      value={editingProduct.description as string}
+                                      onChange={(e) => setEditingProduct({ ...editingProduct, description: e.target.value })}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-2">
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    className="w-28 border rounded-md px-2 py-1 text-right"
+                                    value={editingProduct.price as any}
+                                    onChange={(e) => setEditingProduct({ ...editingProduct, price: e.target.value })}
+                                  />
+                                  <input
+                                    type="number"
+                                    className="w-28 border rounded-md px-2 py-1 text-right"
+                                    value={editingProduct.quantity as any}
+                                    onChange={(e) => setEditingProduct({ ...editingProduct, quantity: e.target.value })}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 justify-end">
+                                <Button variant="ghost" onClick={cancelEditProduct}>Cancel</Button>
+                                <Button onClick={() => handleUpdateProduct(product.id)} disabled={isUpdatingProduct}>
+                                  {isUpdatingProduct ? "Saving..." : "Save"}
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-4">
+                              <div className="flex items-center gap-4">
+                                {product.image_url && (
+                                  <img
+                                    src={`${API_BASE_URL}${product.image_url}`}
+                                    alt={product.name}
+                                    className="h-16 w-16 rounded object-cover border"
+                                  />
+                                )}
+                                <div>
+                                  <h3 className="font-semibold">{product.name}</h3>
+                                  <p className="text-sm text-muted-foreground">{(product as any).description}</p>
+                                  <p className="text-sm text-muted-foreground">Stock: {product.quantity ?? "—"}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg font-bold text-primary">₦{(product.price ?? 0).toFixed(2)}</span>
+
+                                {/* Edit button */}
+                                <Button size="sm" variant="outline" onClick={() => startEditProduct(product)}>Edit</Button>
+
+                                {/* Delete button (shows spinner state when deleting) */}
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleDeleteProduct(product.id)}
+                                  className="bg-red-600 hover:bg-red-700 text-white"
+                                  disabled={deletingProductId === product.id}
+                                  aria-label={`Delete ${product.name}`}
+                                >
+                                  {deletingProductId === product.id ? "Deleting..." : "Delete"}
+                                </Button>
+                              </div>
+                            </div>
                           )}
-                          <div>
-                            <h3 className="font-semibold">{product.name}</h3>
-                            <p className="text-sm text-muted-foreground">
-                              {product.description}
-                            </p>
-                          </div>
                         </div>
-                        <span className="text-lg font-bold text-primary">
-                          ₦{product.price.toFixed(2)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -459,7 +617,6 @@ const AdminDashboard = () => {
                       onChange={(e) => {
                         const val = e.target.value as "day" | "week" | "month" | "year" | "custom" | "";
                         setRange(val);
-                        // clear custom dates when changing away from custom
                         if (val !== "custom") {
                           setStartDate("");
                           setEndDate("");
@@ -498,17 +655,15 @@ const AdminDashboard = () => {
                 </div>
 
                 <div className="mb-6 flex gap-3">
-                  <Button onClick={applyFilters} disabled={isApplyingFilters}>
+                  <Button onClick={async () => { setIsApplyingFilters(true); try { await fetchStats(); toast.success("Filters applied"); } finally { setIsApplyingFilters(false); } }} disabled={isApplyingFilters}>
                     {isApplyingFilters ? "Applying..." : "Apply Filters"}
                   </Button>
                   <Button
                     variant="ghost"
                     onClick={() => {
-                      // reset filters
                       setRange("");
                       setStartDate("");
                       setEndDate("");
-                      // fetch stats without filters
                       fetchStats();
                     }}
                   >
@@ -528,21 +683,14 @@ const AdminDashboard = () => {
                       <div className="rounded-lg border p-4">
                         <p className="text-sm text-muted-foreground">Total Orders</p>
                         <p className="text-2xl font-bold">{stats.total_orders}</p>
-                        {/* contextual text showing active filter */}
                         <p className="text-xs text-muted-foreground mt-2">
-                          {range
-                            ? range === "custom"
-                              ? `Custom: ${startDate || "—"} → ${endDate || "—"}`
-                              : `Range: ${range}`
-                            : "No range filter"}
+                          {range ? (range === "custom" ? `Custom: ${startDate || "—"} → ${endDate || "—"}` : `Range: ${range}`) : "No range filter"}
                         </p>
                       </div>
 
                       <div className="rounded-lg border p-4">
                         <p className="text-sm text-muted-foreground">Total Revenue</p>
-                        <p className="text-2xl font-bold text-primary">
-                          ₦{Number(stats.total_revenue || 0).toFixed(2)}
-                        </p>
+                        <p className="text-2xl font-bold text-primary">₦{Number(stats.total_revenue || 0).toFixed(2)}</p>
                       </div>
 
                       <div className="rounded-lg border p-4">
@@ -550,10 +698,7 @@ const AdminDashboard = () => {
                         {stats.top_products && stats.top_products.length > 0 ? (
                           <div>
                             <p className="font-semibold">{stats.top_products[0].name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              Sold: {stats.top_products[0].total_sold} • Revenue: ₦
-                              {Number(stats.top_products[0].revenue || 0).toFixed(2)}
-                            </p>
+                            <p className="text-sm text-muted-foreground">Sold: {stats.top_products[0].total_sold} • Revenue: ₦{Number(stats.top_products[0].revenue || 0).toFixed(2)}</p>
                           </div>
                         ) : (
                           <p className="text-sm text-muted-foreground">No top product yet</p>
@@ -592,9 +737,7 @@ const AdminDashboard = () => {
                               <div key={p.name + idx} className="flex justify-between">
                                 <div>
                                   <p className="font-medium">{p.name}</p>
-                                  <p className="text-sm text-muted-foreground">
-                                    Sold: {p.total_sold}
-                                  </p>
+                                  <p className="text-sm text-muted-foreground">Sold: {p.total_sold}</p>
                                 </div>
                                 <div className="text-right">
                                   <p className="font-medium">₦{Number(p.revenue || 0).toFixed(2)}</p>
@@ -620,9 +763,7 @@ const AdminDashboard = () => {
                 <div className="flex justify-between items-center">
                   <CardTitle>All Orders ({groupedOrders.length})</CardTitle>
                   <Button variant="outline" onClick={fetchAllOrders} disabled={isLoadingAllOrders}>
-                    <RefreshCw
-                      className={`h-4 w-4 mr-2 ${isLoadingAllOrders ? "animate-spin" : ""}`}
-                    />
+                    <RefreshCw className={`h-4 w-4 mr-2 ${isLoadingAllOrders ? "animate-spin" : ""}`} />
                     Refresh
                   </Button>
                 </div>
@@ -637,12 +778,10 @@ const AdminDashboard = () => {
                 ) : (
                   <div className="space-y-3">
                     {groupedOrders.map((group) => (
-                      <div
-                        key={group.code}
-                        className="border rounded-lg p-4 flex justify-between items-center"
-                      >
+                      <div key={group.code} className="border rounded-lg p-4 flex justify-between items-center">
                         <div>
                           <p className="font-semibold">Code: {group.code}</p>
+                          <p className="text-sm text-muted-foreground">By: {group.user ?? "—"}</p>
                           {group.items.length === 0 ? (
                             <p className="text-sm text-muted-foreground">No items</p>
                           ) : (
@@ -652,36 +791,17 @@ const AdminDashboard = () => {
                               </p>
                             ))
                           )}
-                          <p className="text-sm mt-1">
-                            <Badge
-                              variant={group.collected ? "secondary" : "outline"}
-                              className={
-                                group.collected
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }
-                            >
+                          <div className="text-sm mt-1">
+                            <Badge variant={group.collected ? "secondary" : "outline"} className={group.collected ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}>
                               {group.collected ? "Collected" : "Pending"}
                             </Badge>
-                          </p>
+                          </div>
                         </div>
                         <div className="text-right">
                           <p className="font-bold text-primary mb-2">₦{group.total.toFixed(2)}</p>
                           {!group.collected && (
-                            <Button
-                              size="sm"
-                              onClick={() => handleMarkAsCollected(group.code)}
-                              disabled={updatingOrderCode === group.code}
-                            >
-                              {updatingOrderCode === group.code ? (
-                                <>
-                                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Updating...
-                                </>
-                              ) : (
-                                <>
-                                  <CheckCircle2 className="h-4 w-4 mr-2" /> Mark Collected
-                                </>
-                              )}
+                            <Button size="sm" onClick={() => handleMarkAsCollected(group.code)} disabled={updatingOrderCode === group.code}>
+                              {updatingOrderCode === group.code ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Updating...</> : <><CheckCircle2 className="h-4 w-4 mr-2" /> Mark Collected</>}
                             </Button>
                           )}
                         </div>
@@ -729,59 +849,35 @@ const AdminDashboard = () => {
                   <p className="text-sm text-muted-foreground">Code: {order.code}</p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">By: {(order as any).user?.username ?? "—"}</p>
+                  </div>
+
                   <div className="space-y-2">
                     {order.items?.map((item, i) => (
-                      <div
-                        key={i}
-                        className="flex justify-between border-b pb-2 last:border-0"
-                      >
-                        <span className="text-muted-foreground">
-                          {item.product_name} × {item.quantity}
-                        </span>
+                      <div key={i} className="flex justify-between border-b pb-2 last:border-0">
+                        <span className="text-muted-foreground">{item.product_name} × {item.quantity}</span>
                       </div>
                     ))}
                   </div>
 
                   <div className="flex justify-between items-center mt-4">
                     <span className="text-muted-foreground">Status:</span>
-                    <Badge
-                      variant={order.collected ? "secondary" : "outline"}
-                      className={
-                        order.collected
-                          ? "bg-green-100 text-green-800"
-                          : "bg-yellow-100 text-yellow-800"
-                      }
-                    >
-                      {order.collected ? "Collected" : "Pending"}
+                    <Badge variant={(order as any).collected ? "secondary" : "outline"} className={(order as any).collected ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}>
+                      {(order as any).collected ? "Collected" : "Pending"}
                     </Badge>
                   </div>
 
                   <div className="border-t pt-4">
                     <div className="flex justify-between text-xl font-bold">
                       <span>Total</span>
-                      <span className="text-primary">
-                        ₦{order?.total ? order.total.toFixed(2) : "0.00"}
-                      </span>
+                      <span className="text-primary">₦{order?.total ? (order.total as number).toFixed(2) : "0.00"}</span>
                     </div>
                   </div>
 
-                  {!order.collected && (
-                    <Button
-                      onClick={() => handleMarkAsCollected(order.code)}
-                      disabled={updatingOrderCode === order.code}
-                      className="w-full"
-                    >
-                      {updatingOrderCode === order.code ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                          Updating...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 mr-2" />
-                          Mark as Collected
-                        </>
-                      )}
+                  {!(order as any).collected && (
+                    <Button onClick={() => handleMarkAsCollected(order.code)} disabled={updatingOrderCode === order.code} className="w-full">
+                      {updatingOrderCode === order.code ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Updating...</> : <><CheckCircle2 className="h-4 w-4 mr-2" /> Mark as Collected</>}
                     </Button>
                   )}
                 </CardContent>

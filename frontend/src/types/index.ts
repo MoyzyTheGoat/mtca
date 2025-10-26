@@ -30,11 +30,18 @@ export interface OrderDetail {
   items: {
     product_name: string;
     quantity: number;
+    price?: number;
+    subtotal?: number;
   }[];
   total: number;
-  status?: 'pending' | 'collected';
+  collected?: boolean; // explicit boolean
   created_at?: string;
+  user?: {
+    id: number;
+    username: string;
+  } | null;
 }
+
 
 export interface LoginResponse {
   access_token: string;

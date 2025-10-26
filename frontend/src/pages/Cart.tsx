@@ -1,3 +1,4 @@
+// src/pages/Cart.tsx
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "@/api/axios";
@@ -10,31 +11,78 @@ import { Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 
 /**
- * Cart component:
- * - Allows typing any value into quantity inputs (raw string state)
- * - Commits quantity on blur or Enter keypress (parses, clamps to stock)
- * - If typed quantity > available stock -> clamps to stock and shows toast
- * - Saves to localStorage on commit
+ * Helper: try to extract friendly message(s) from different API error shapes.
+ * But we won't show raw objects; we prefer inline messages.
  */
+function formatApiMessage(err: any): string {
+  if (!err) return "Request failed";
+  const data = err?.response?.data ?? err;
+  if (typeof data === "string") return data;
+  if (data?.detail && typeof data.detail === "string") return data.detail;
+  if (data?.detail && Array.isArray(data.detail)) {
+    // a summary for toast only
+    const messages = data.detail.map((d: any) => d?.msg ?? JSON.stringify(d));
+    return messages.join("; ");
+  }
+  if (data?.message) return String(data.message);
+  return "Request failed";
+}
+
+/**
+ * Parse FastAPI/Pydantic validation errors (array of objects with loc/msg/...)
+ * and return a map from item index (body.N) to friendly message.
+ */
+function parseValidationErrors(detail: any[]): Record<number, string> {
+  const map: Record<number, string> = {};
+  if (!Array.isArray(detail)) return map;
+
+  for (const err of detail) {
+    if (!err) continue;
+    const loc = err.loc;
+    const msg = err.msg || (err.message ? err.message : JSON.stringify(err));
+    // typical loc shapes: ["body", 2, "quantity"] or ["body", 0, "product_id"]
+    if (Array.isArray(loc) && loc.length >= 2 && (loc[0] === "body" || loc[0] === "items")) {
+      const maybeIndex = loc[1];
+      const idx = typeof maybeIndex === "number" ? maybeIndex : parseInt(maybeIndex, 10);
+      if (!Number.isNaN(idx)) {
+        // map to index for now; the caller will map index->productId
+        map[idx] = msg;
+        continue;
+      }
+    }
+    // fallback: put at -1 to indicate general error
+    map[-1] = msg;
+  }
+  return map;
+}
+
 const Cart = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
-  // rawInputs holds the free-typing string values per product id
   const [rawInputs, setRawInputs] = useState<Record<number, string>>({});
+  const [errors, setErrors] = useState<Record<number, string>>({}); // productId -> message
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
-  const commitTimers = useRef<Record<number, number | null>>({}); // optional debounce if you want
+  const commitTimers = useRef<Record<number, number | null>>({});
 
   useEffect(() => {
     loadCart();
   }, []);
 
-  // whenever cart changes, sync rawInputs so inputs reflect current quantities
   useEffect(() => {
     const map: Record<number, string> = {};
     cart.forEach((item) => {
       map[item.product.id] = String(item.quantity);
     });
     setRawInputs(map);
+    // clear errors for items that were removed
+    setErrors((prev) => {
+      const next: Record<number, string> = {};
+      for (const key of Object.keys(prev)) {
+        const pid = Number(key);
+        if (cart.find((c) => c.product.id === pid)) next[pid] = prev[pid];
+      }
+      return next;
+    });
   }, [cart]);
 
   const loadCart = () => {
@@ -54,67 +102,77 @@ const Cart = () => {
     setCart(updatedCart);
   };
 
-  // update the raw string as user types — allows typing without selecting existing text
   const handleRawInputChange = (productId: number, value: string) => {
     setRawInputs((prev) => ({ ...prev, [productId]: value }));
-
-    // OPTIONAL: debounce auto-commit while typing (commented out)
-    // if (commitTimers.current[productId]) window.clearTimeout(commitTimers.current[productId]!);
-    // commitTimers.current[productId] = window.setTimeout(() => commitQuantity(productId), 1000);
+    // clear inline error while typing to avoid flicker — will revalidate on commit
+    setErrors((prev) => {
+      const copy = { ...prev };
+      delete copy[productId];
+      return copy;
+    });
   };
 
-  // Commit the typed value into the cart (on blur or Enter)
   const commitQuantity = (productId: number) => {
-    const raw = rawInputs[productId];
-    // parse int, allow commas/spaces etc by removing non-digits
-    const cleaned = (raw || "").replace(/[^\d]/g, "");
+    const raw = rawInputs[productId] ?? "";
+    const cleaned = raw.replace(/[^\d]/g, "");
     let parsed = parseInt(cleaned, 10);
     if (Number.isNaN(parsed) || parsed < 1) parsed = 1;
 
-    // find the cart item
     const idx = cart.findIndex((c) => c.product.id === productId);
     if (idx === -1) {
-      // nothing to commit
       setRawInputs((prev) => ({ ...prev, [productId]: String(parsed) }));
       return;
     }
 
     const availableStock = Number(cart[idx].product.quantity ?? Infinity);
 
+    // reset previous error for this row
+    setErrors((prev) => {
+      const copy = { ...prev };
+      delete copy[productId];
+      return copy;
+    });
+
     if (availableStock !== Infinity && parsed > availableStock) {
-      toast.error(
-        `Only ${availableStock} unit${availableStock === 1 ? "" : "s"} available. Quantity set to ${availableStock}.`
-      );
+      // clamp and show inline message (no raw object toast)
       parsed = availableStock;
+      setErrors((prev) => ({
+        ...prev,
+        [productId]: `Only ${availableStock} available — quantity adjusted.`,
+      }));
     }
 
-    // update cart
     const updated = cart.map((c, i) => (i === idx ? { ...c, quantity: parsed } : c));
     saveCart(updated);
-
-    // sync raw input to committed value
     setRawInputs((prev) => ({ ...prev, [productId]: String(parsed) }));
   };
 
   const handleQuantityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, productId: number) => {
     if (e.key === "Enter") {
-      // commit on Enter
-      (e.target as HTMLInputElement).blur(); // triggers onBlur as well
+      (e.target as HTMLInputElement).blur();
       commitQuantity(productId);
     }
     if (e.key === "Escape") {
-      // reset to last committed value
       const item = cart.find((c) => c.product.id === productId);
       setRawInputs((prev) => ({ ...prev, [productId]: item ? String(item.quantity) : "1" }));
       (e.target as HTMLInputElement).blur();
+      setErrors((prev) => {
+        const copy = { ...prev };
+        delete copy[productId];
+        return copy;
+      });
     }
   };
 
   const removeItem = (productId: number) => {
     const updatedCart = cart.filter((item) => item.product.id !== productId);
     saveCart(updatedCart);
-    // clean up raw input
     setRawInputs((prev) => {
+      const copy = { ...prev };
+      delete copy[productId];
+      return copy;
+    });
+    setErrors((prev) => {
       const copy = { ...prev };
       delete copy[productId];
       return copy;
@@ -122,8 +180,17 @@ const Cart = () => {
     toast.info("Item removed from cart");
   };
 
-  const calculateTotal = () => {
-    return cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+  const calculateTotal = () => cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
+
+  const hasErrors = () => {
+    // any inline errors or quantity mismatches
+    if (Object.values(errors).some(Boolean)) return true;
+    for (const item of cart) {
+      const avail = Number(item.product.quantity ?? Infinity);
+      if (avail !== Infinity && item.quantity > avail) return true;
+      if (!Number.isFinite(item.quantity) || item.quantity < 1) return true;
+    }
+    return false;
   };
 
   const handleCheckout = async () => {
@@ -132,10 +199,28 @@ const Cart = () => {
       return;
     }
 
+    // Re-run client-side validations: clamp or mark errors
+    const checked: CartItem[] = [...cart];
+    const newErrors: Record<number, string> = {};
+    for (let i = 0; i < checked.length; i++) {
+      const it = checked[i];
+      const avail = Number(it.product.quantity ?? Infinity);
+      if (!Number.isFinite(it.quantity) || it.quantity < 1) {
+        newErrors[it.product.id] = "Quantity must be at least 1";
+      } else if (avail !== Infinity && it.quantity > avail) {
+        newErrors[it.product.id] = `Only ${avail} available`;
+      }
+    }
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      toast.error("Please fix highlighted quantities before checkout");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      // Send array of items to match backend `create_orders`
       const orderItems = cart.map((item) => ({
         product_id: item.product.id,
         quantity: item.quantity,
@@ -146,14 +231,54 @@ const Cart = () => {
       localStorage.removeItem("cart");
       setCart([]);
       setRawInputs({});
+      setErrors({});
 
-      // backend returns a code
       const pickupCode = response.data.code;
-
-      toast.success(`Order placed! Your pickup code is: ${pickupCode}`);
+      toast.success(`Order placed — pickup code: ${pickupCode}`);
       navigate(`/pickup?code=${pickupCode}`);
-    } catch (error: any) {
-      toast.error(error.response?.data?.detail || "Failed to place order");
+    } catch (err: any) {
+      // Try to extract validation errors and show inline messages instead of raw toast object
+      const detail = err?.response?.data?.detail;
+      if (Array.isArray(detail)) {
+        const byIndex = parseValidationErrors(detail); // idx -> message
+        // Map index -> productId using the same order we sent
+        const indexToPidMap: Record<number, number> = {};
+        cart.forEach((c, idx) => {
+          indexToPidMap[idx] = c.product.id;
+        });
+
+        const inlineErrors: Record<number, string> = {};
+        for (const [idxStr, msg] of Object.entries(byIndex)) {
+          const idx = Number(idxStr);
+          if (idx >= 0 && indexToPidMap[idx] !== undefined) {
+            inlineErrors[indexToPidMap[idx]] = msg;
+          } else {
+            // general error; put a top-level toast-friendly message (but not the raw object)
+            inlineErrors[-1] = msg;
+          }
+        }
+
+        // set per-product inline messages (ignore any -1 here; show toast instead)
+        const productErrors: Record<number, string> = {};
+        for (const [pidStr, msg] of Object.entries(inlineErrors)) {
+          const pid = Number(pidStr);
+          if (pid === -1) continue;
+          productErrors[pid] = msg;
+        }
+        setErrors(productErrors);
+
+        // if there was an unclassified error, show a friendly toast
+        if (inlineErrors[-1]) {
+          toast.error(String(inlineErrors[-1]));
+        } else {
+          toast.error("Please fix highlighted fields and try again");
+        }
+      } else {
+        // Generic fallback: friendly toast (no raw object)
+        const friendly = formatApiMessage(err);
+        toast.error(friendly || "Failed to place order");
+      }
+      console.error("Checkout error:", err);
     } finally {
       setIsLoading(false);
     }
@@ -181,39 +306,47 @@ const Cart = () => {
                   <CardTitle>Items ({cart.length})</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {cart.map((item) => (
-                    <div
-                      key={item.product.id}
-                      className="flex items-center justify-between border-b pb-4 last:border-0"
-                    >
-                      <div className="flex-1">
-                        <h3 className="font-semibold">{item.product.name}</h3>
-                        <p className="text-sm text-muted-foreground">{item.product.description}</p>
-                        <p className="mt-1 font-medium text-primary">₦{item.product.price.toFixed(2)}</p>
-                      </div>
-
-                      <div className="flex items-center gap-4">
-                        {/* numeric input for quantity — raw string allows free typing */}
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="text"
-                            inputMode="numeric"
-                            pattern="\d*"
-                            value={rawInputs[item.product.id] ?? String(item.quantity)}
-                            onChange={(e) => handleRawInputChange(item.product.id, e.target.value)}
-                            onBlur={() => commitQuantity(item.product.id)}
-                            onKeyDown={(e) => handleQuantityKeyDown(e, item.product.id)}
-                            className="w-24 text-center"
-                            aria-label={`Quantity for ${item.product.name}`}
-                          />
+                  {cart.map((item) => {
+                    const pid = item.product.id;
+                    const inputError = errors[pid];
+                    return (
+                      <div
+                        key={pid}
+                        className="flex items-center justify-between border-b pb-4 last:border-0"
+                      >
+                        <div className="flex-1">
+                          <h3 className="font-semibold">{item.product.name}</h3>
+                          <p className="text-sm text-muted-foreground">{item.product.description}</p>
+                          <p className="mt-1 font-medium text-primary">₦{item.product.price.toFixed(2)}</p>
                         </div>
 
-                        <Button variant="ghost" size="icon" onClick={() => removeItem(item.product.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
+                        <div className="flex items-center gap-4">
+                          <div className="flex flex-col items-end">
+                            <Input
+                              type="text"
+                              inputMode="numeric"
+                              pattern="\d*"
+                              value={rawInputs[pid] ?? String(item.quantity)}
+                              onChange={(e) => handleRawInputChange(pid, e.target.value)}
+                              onBlur={() => commitQuantity(pid)}
+                              onKeyDown={(e) => handleQuantityKeyDown(e, pid)}
+                              className={`w-24 text-center ${inputError ? "border-red-500 ring-red-200" : ""}`}
+                              aria-label={`Quantity for ${item.product.name}`}
+                            />
+                            {inputError && (
+                              <p className="mt-1 text-xs text-red-600 text-right max-w-xs">
+                                {inputError}
+                              </p>
+                            )}
+                          </div>
+
+                          <Button variant="ghost" size="icon" onClick={() => removeItem(pid)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </CardContent>
               </Card>
             </div>
@@ -240,9 +373,21 @@ const Cart = () => {
                       <span className="text-primary">₦{calculateTotal().toFixed(2)}</span>
                     </div>
                   </div>
-                  <Button className="w-full" onClick={handleCheckout} disabled={isLoading}>
+
+                  <Button
+                    className="w-full"
+                    onClick={handleCheckout}
+                    disabled={isLoading || hasErrors()}
+                    title={hasErrors() ? "Fix highlighted fields before checkout" : undefined}
+                  >
                     {isLoading ? "Processing..." : "Checkout"}
                   </Button>
+
+                  {hasErrors() && (
+                    <p className="mt-2 text-sm text-red-600">
+                      Fix highlighted quantities above before continuing.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>

@@ -73,50 +73,71 @@ def update_product(db: Session, product_id: int, update_data: schemas.ProductUpd
 
 
 def delete_product(db: Session, product_id: int):
-    product = get_product(db, product_id)
+    product = db.query(models.Product).filter(models.Product.id == product_id).first()
     if not product:
-        return None
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Check for existing orders
+    if db.query(models.Order).filter(models.Order.product_id == product_id).first():
+        raise HTTPException(
+            status_code=400, detail="Cannot delete product with existing orders"
+        )
+
     db.delete(product)
     db.commit()
-    return product
+    return {"message": "Product deleted successfully"}
 
 
-def get_order(db: Session, order_id: int):
-    return db.query(models.Order).filter(models.Order.id == order_id).first()
+from sqlalchemy.orm import Session, joinedload
+from datetime import datetime
+from typing import Dict
+from . import models
+from fastapi import HTTPException, status
 
 
-def get_all_orders(db: Session):
+def get_all_orders(db: Session) -> List[Dict]:
     """
-    Return grouped orders by code.
-    Each item in the returned list has the shape:
-    {
-      "code": "...",
-      "items": [{ "product_name": "...", "quantity": n, "price": x?, "subtotal": y? }, ...],
-      "total": 123.45,
-      "collected": True/False,
-      "created_at": <datetime>
-    }
+    Return grouped orders by code for admin view.
+    Each group includes:
+      - code
+      - items: [{ product_name, quantity, price?, subtotal? }, ...]
+      - total
+      - collected (True if every row in the group is collected)
+      - user: { id, username } or None
+      - created_at (from first row seen in the group)
     """
-    orders = db.query(models.Order).order_by(models.Order.created_at.desc()).all()
+    orders = (
+        db.query(models.Order)
+        .options(joinedload(models.Order.product), joinedload(models.Order.user))
+        .order_by(models.Order.created_at.desc())
+        .all()
+    )
+
     grouped: Dict[str, Dict] = {}
 
     for ord_row in orders:
         code = ord_row.code or "UNKNOWN"
         if code not in grouped:
+            user_obj = getattr(ord_row, "user", None)
             grouped[code] = {
                 "code": code,
                 "items": [],
                 "total": 0.0,
-                # start collected as True and AND with each row (so any False -> False)
                 "collected": True,
                 "created_at": getattr(ord_row, "created_at", None),
+                "user": (
+                    {
+                        "id": getattr(user_obj, "id", None),
+                        "username": getattr(user_obj, "username", None),
+                    }
+                    if user_obj
+                    else None
+                ),
             }
 
         product = getattr(ord_row, "product", None)
-        product_name = (
-            getattr(product, "name", "Unknown") if product is not None else "Unknown"
-        )
-        price = getattr(product, "price", None) if product is not None else None
+        product_name = getattr(product, "name", "Unknown") if product else "Unknown"
+        price = getattr(product, "price", None) if product else None
         quantity = getattr(ord_row, "quantity", 0)
         row_total_amount = getattr(ord_row, "total_amount", None)
 
@@ -132,7 +153,7 @@ def get_all_orders(db: Session):
             )
             grouped[code]["total"] += subtotal
         else:
-            # fallback when product.price is not available; try row total_amount
+            # fallback when price not available (use stored row total_amount)
             grouped[code]["items"].append(
                 {
                     "product_name": product_name,
@@ -141,28 +162,48 @@ def get_all_orders(db: Session):
             )
             grouped[code]["total"] += float(row_total_amount or 0.0)
 
-        # track collected status (true only if every row for code is collected)
+        # If grouped user is empty, try set from this row (first non-null)
+        if not grouped[code].get("user"):
+            u = getattr(ord_row, "user", None)
+            grouped[code]["user"] = (
+                {"id": getattr(u, "id", None), "username": getattr(u, "username", None)}
+                if u
+                else None
+            )
+
+        # only true if all rows are collected
         grouped[code]["collected"] = grouped[code]["collected"] and bool(
             ord_row.collected
         )
 
-        # keep earliest created_at for the group if missing (or just keep first seen)
+        # prefer earliest non-null created_at (we set on creation above)
         if grouped[code]["created_at"] is None:
             grouped[code]["created_at"] = getattr(ord_row, "created_at", None)
 
-    # convert to list, sort by created_at desc (newest first)
     results = list(grouped.values())
+    # sort by created_at desc (newest first)
     results.sort(key=lambda x: x.get("created_at") or datetime.min, reverse=True)
 
-    # Round totals
+    # round totals
     for r in results:
         r["total"] = round(r.get("total", 0.0) or 0.0, 2)
 
     return results
 
 
-def get_order_by_code(db: Session, code: str):
-    orders = db.query(models.Order).filter(models.Order.code == code).all()
+def get_order_by_code(db: Session, code: str) -> Dict:
+    """
+    Return a grouped order for a specific code (admin / search).
+    Returns:
+      { code, items: [{product_name, quantity, price, subtotal}], total, collected, user: {id, username} or None, created_at }
+    """
+    orders = (
+        db.query(models.Order)
+        .options(joinedload(models.Order.product), joinedload(models.Order.user))
+        .filter(models.Order.code == code)
+        .order_by(models.Order.created_at.asc())
+        .all()
+    )
 
     if not orders:
         raise HTTPException(
@@ -171,28 +212,44 @@ def get_order_by_code(db: Session, code: str):
         )
 
     items = []
-    total = 0
+    total = 0.0
+    collected = True
+    created_at = None
+    user_obj = getattr(orders[0], "user", None)
 
     for order in orders:
-        product = order.product  # Assuming a relationship exists: Order.product
-        price = getattr(product, "price", 0)
+        product = order.product
+        price = getattr(product, "price", 0) if product else 0
         quantity = getattr(order, "quantity", 0)
-        total += price * quantity
-
+        subtotal = round(price * quantity, 2)
         items.append(
             {
-                "product_name": getattr(product, "name", "Unknown"),
+                "product_name": (
+                    getattr(product, "name", "Unknown") if product else "Unknown"
+                ),
                 "quantity": quantity,
                 "price": price,
-                "subtotal": round(price * quantity, 2),
+                "subtotal": subtotal,
             }
         )
+        total += subtotal
+        collected = collected and bool(order.collected)
+        created_at = created_at or getattr(order, "created_at", None)
 
     return {
         "code": code,
         "items": items,
         "total": round(total, 2),
-        "collected": orders[0].collected,
+        "collected": collected,
+        "created_at": created_at,
+        "user": (
+            {
+                "id": getattr(user_obj, "id", None),
+                "username": getattr(user_obj, "username", None),
+            }
+            if user_obj
+            else None
+        ),
     }
 
 
@@ -264,19 +321,21 @@ def mark_orders_collected_by_code(db: Session, code: str):
     return orders
 
 
-def get_user_orders_grouped(db: Session, user_id: int):
+def get_user_orders_grouped(db: Session, user_id: int) -> List[Dict]:
     """
     Return grouped orders for a specific user (grouped by code).
-    Each group includes multiple items with total price, etc.
+    Each returned group:
+      { code, items: [{product_name, quantity, price, subtotal}], total, collected, created_at }
     """
     orders = (
         db.query(models.Order)
+        .options(joinedload(models.Order.product))
         .filter(models.Order.user_id == user_id)
         .order_by(models.Order.created_at.desc())
         .all()
     )
 
-    grouped = {}
+    grouped: Dict[str, Dict] = {}
 
     for ord_row in orders:
         code = ord_row.code or "UNKNOWN"
@@ -291,7 +350,7 @@ def get_user_orders_grouped(db: Session, user_id: int):
 
         product = getattr(ord_row, "product", None)
         product_name = getattr(product, "name", "Unknown") if product else "Unknown"
-        price = getattr(product, "price", 0.0)
+        price = getattr(product, "price", 0.0) if product else 0.0
         quantity = getattr(ord_row, "quantity", 0)
         subtotal = round(price * quantity, 2)
 
@@ -303,31 +362,39 @@ def get_user_orders_grouped(db: Session, user_id: int):
                 "subtotal": subtotal,
             }
         )
-
         grouped[code]["total"] += subtotal
-        grouped[code]["collected"] = grouped[code]["collected"] and ord_row.collected
+        grouped[code]["collected"] = grouped[code]["collected"] and bool(
+            ord_row.collected
+        )
+
         if grouped[code]["created_at"] is None:
             grouped[code]["created_at"] = getattr(ord_row, "created_at", None)
 
     results = list(grouped.values())
     results.sort(key=lambda x: x.get("created_at") or datetime.min, reverse=True)
 
+    # round totals
+    for r in results:
+        r["total"] = round(r.get("total", 0.0) or 0.0, 2)
+
     return results
 
 
-def get_user_order_by_code(db: Session, user_id: int, code: str):
+def get_user_order_by_code(db: Session, user_id: int, code: str) -> Dict | None:
     """
     Return grouped order for this user filtered by code (case-insensitive).
+    Returns None if not found.
     """
     normalized_code = code.strip().upper()
 
     orders = (
         db.query(models.Order)
+        .options(joinedload(models.Order.product))
         .filter(
             models.Order.user_id == user_id,
             func.upper(models.Order.code) == normalized_code,
         )
-        .order_by(models.Order.created_at.desc())
+        .order_by(models.Order.created_at.asc())
         .all()
     )
 
@@ -341,7 +408,7 @@ def get_user_order_by_code(db: Session, user_id: int, code: str):
 
     for o in orders:
         product = o.product
-        price = product.price if product else 0
+        price = getattr(product, "price", 0) if product else 0
         subtotal = round(price * o.quantity, 2)
         items.append(
             {
@@ -352,13 +419,13 @@ def get_user_order_by_code(db: Session, user_id: int, code: str):
             }
         )
         total += subtotal
-        collected = collected and o.collected
-        created_at = created_at or o.created_at
+        collected = collected and bool(o.collected)
+        created_at = created_at or getattr(o, "created_at", None)
 
     return {
         "code": normalized_code,
         "items": items,
-        "total": total,
+        "total": round(total, 2),
         "collected": collected,
         "created_at": created_at,
     }
