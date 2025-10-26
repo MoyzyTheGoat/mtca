@@ -20,6 +20,9 @@ def get_order_stats(
     """
     Returns statistics. Important: total_orders counts unique order codes (not item rows).
     Date filters apply to the Order.created_at column.
+
+    This implementation prefers `Order.line_total` (snapshot) when present and falls
+    back to `Order.total_amount` for backward compatibility.
     """
 
     # Base query: collected orders only
@@ -52,34 +55,37 @@ def get_order_stats(
                 status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
             )
 
+    # Choose revenue field: prefer line_total (snapshot) if present, otherwise use total_amount
+    revenue_field = getattr(models.Order, "line_total", None) or getattr(
+        models.Order, "total_amount"
+    )
+
     # --- total_orders: count distinct codes (unique orders) ---
     total_orders = (
         query.with_entities(func.count(func.distinct(models.Order.code))).scalar() or 0
     )
 
-    # --- total_revenue: sum of total_amount across filtered rows (this is correct for revenue) ---
-    total_revenue = (
-        query.with_entities(func.sum(models.Order.total_amount)).scalar() or 0
-    )
+    # --- total_revenue: sum of chosen revenue field across filtered rows ---
+    total_revenue = query.with_entities(func.sum(revenue_field)).scalar() or 0
 
-    # --- monthly_stats: revenue per month (formatted YYYY-MM) ---
+    # --- monthly_stats: revenue per month (formatted YYYY-MM) using chosen revenue field ---
     monthly_stats = (
         query.with_entities(
             func.strftime("%Y-%m", models.Order.created_at).label("month"),
-            func.sum(models.Order.total_amount).label("revenue"),
+            func.sum(revenue_field).label("revenue"),
         )
         .group_by("month")
         .order_by("month")
         .all()
     )
 
-    # --- top_products: use the same filtered query joined to Product to get sums ---
+    # --- top_products: aggregate by product using quantity and chosen revenue field ---
     top_products = (
-        query.join(models.Product)
+        query.join(models.Product, models.Product.id == models.Order.product_id)
         .with_entities(
             models.Product.name,
             func.sum(models.Order.quantity).label("total_sold"),
-            func.sum(models.Order.total_amount).label("revenue"),
+            func.sum(revenue_field).label("revenue"),
         )
         .group_by(models.Product.name)
         .order_by(func.sum(models.Order.quantity).desc())

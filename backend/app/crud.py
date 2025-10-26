@@ -1,13 +1,15 @@
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
-from passlib.context import CryptContext
-from typing import List, Dict
-from . import models, schemas
+# app/crud.py
+from typing import List, Dict, Optional
+from datetime import datetime
 import random
 import string
-from datetime import datetime
-from sqlalchemy import func
 
+from passlib.context import CryptContext
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+from fastapi import HTTPException, status
+
+from . import models, schemas
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
@@ -88,24 +90,91 @@ def delete_product(db: Session, product_id: int):
     return {"message": "Product deleted successfully"}
 
 
-from sqlalchemy.orm import Session, joinedload
-from datetime import datetime
-from typing import Dict
-from . import models
-from fastapi import HTTPException, status
+def generate_order_code(db: Session):
+    characters = string.ascii_uppercase + string.digits
+    while True:
+        code = "".join(random.choices(characters, k=6))
+        existing_order = (
+            db.query(models.Order).filter(models.Order.code == code).first()
+        )
+        if not existing_order:
+            return code
+
+
+def create_orders(
+    db: Session, orders: List[schemas.OrderCreate], user_id: Optional[int] = None
+):
+    if not orders:
+        raise HTTPException(status_code=400, detail="No order items provided")
+
+    order_code = generate_order_code(db)
+    total = 0.0
+    order_items = []
+
+    for order_data in orders:
+        product = get_product(db, order_data.product_id)
+        if not product:
+            raise HTTPException(
+                status_code=404, detail=f"Product {order_data.product_id} not found"
+            )
+
+        if product.quantity < order_data.quantity:
+            raise HTTPException(
+                status_code=400, detail=f"Insufficient quantity for {product.name}"
+            )
+
+        # decrement inventory
+        product.quantity -= order_data.quantity
+
+        # snapshot the current product price
+        unit_price = float(product.price or 0.0)
+        item_total = round(unit_price * order_data.quantity, 2)
+        total += item_total
+
+        # create a single row per item but include immutable snapshot fields
+        new_order = models.Order(
+            product_id=order_data.product_id,
+            quantity=order_data.quantity,
+            code=order_code,
+            collected=False,
+            total_amount=item_total,  # backward-compat
+            unit_price=unit_price,  # snapshot
+            line_total=item_total,  # snapshot
+            user_id=user_id,
+        )
+
+        db.add(new_order)
+
+        order_items.append(
+            {
+                "product_name": product.name,
+                "quantity": order_data.quantity,
+                "price": unit_price,
+                "subtotal": item_total,
+            }
+        )
+
+    db.commit()
+
+    return {
+        "code": order_code,
+        "total": round(total, 2),
+        "collected": False,
+        "items": order_items,
+    }
+
+
+def mark_orders_collected_by_code(db: Session, code: str):
+    orders = db.query(models.Order).filter(models.Order.code == code).all()
+    if not orders:
+        raise HTTPException(status_code=404, detail="No orders found with that code")
+    for order in orders:
+        order.collected = True
+    db.commit()
+    return orders
 
 
 def get_all_orders(db: Session) -> List[Dict]:
-    """
-    Return grouped orders by code for admin view.
-    Each group includes:
-      - code
-      - items: [{ product_name, quantity, price?, subtotal? }, ...]
-      - total
-      - collected (True if every row in the group is collected)
-      - user: { id, username } or None
-      - created_at (from first row seen in the group)
-    """
     orders = (
         db.query(models.Order)
         .options(joinedload(models.Order.product), joinedload(models.Order.user))
@@ -137,11 +206,39 @@ def get_all_orders(db: Session) -> List[Dict]:
 
         product = getattr(ord_row, "product", None)
         product_name = getattr(product, "name", "Unknown") if product else "Unknown"
-        price = getattr(product, "price", None) if product else None
-        quantity = getattr(ord_row, "quantity", 0)
-        row_total_amount = getattr(ord_row, "total_amount", None)
 
-        if price is not None:
+        # Prefer snapshot unit_price/line_total on the order row; fall back to product.price/total_amount
+        unit_price = getattr(ord_row, "unit_price", None)
+        line_total = getattr(ord_row, "line_total", None)
+        row_total_amount = getattr(ord_row, "total_amount", None)
+        quantity = getattr(ord_row, "quantity", 0)
+
+        if unit_price is not None and not (
+            unit_price == 0 and line_total is None and row_total_amount is None
+        ):
+            subtotal = round(unit_price * (quantity or 0), 2)
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": float(unit_price),
+                    "subtotal": float(subtotal),
+                }
+            )
+            grouped[code]["total"] += subtotal
+        elif line_total is not None:
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": float(unit_price) if unit_price is not None else None,
+                    "subtotal": float(line_total),
+                }
+            )
+            grouped[code]["total"] += float(line_total or 0.0)
+        elif getattr(product, "price", None) is not None:
+            # last-resort: use product price (should not be used for historical correctness if snapshot exists)
+            price = float(getattr(product, "price", 0.0))
             subtotal = round(price * (quantity or 0), 2)
             grouped[code]["items"].append(
                 {
@@ -153,11 +250,12 @@ def get_all_orders(db: Session) -> List[Dict]:
             )
             grouped[code]["total"] += subtotal
         else:
-            # fallback when price not available (use stored row total_amount)
+            # fallback to stored row total_amount
             grouped[code]["items"].append(
                 {
                     "product_name": product_name,
                     "quantity": quantity,
+                    "subtotal": float(row_total_amount or 0.0),
                 }
             )
             grouped[code]["total"] += float(row_total_amount or 0.0)
@@ -184,7 +282,7 @@ def get_all_orders(db: Session) -> List[Dict]:
     # sort by created_at desc (newest first)
     results.sort(key=lambda x: x.get("created_at") or datetime.min, reverse=True)
 
-    # round totals
+    # round totals and ensure types are JSON-safe
     for r in results:
         r["total"] = round(r.get("total", 0.0) or 0.0, 2)
 
@@ -192,11 +290,6 @@ def get_all_orders(db: Session) -> List[Dict]:
 
 
 def get_order_by_code(db: Session, code: str) -> Dict:
-    """
-    Return a grouped order for a specific code (admin / search).
-    Returns:
-      { code, items: [{product_name, quantity, price, subtotal}], total, collected, user: {id, username} or None, created_at }
-    """
     orders = (
         db.query(models.Order)
         .options(joinedload(models.Order.product), joinedload(models.Order.user))
@@ -219,20 +312,57 @@ def get_order_by_code(db: Session, code: str) -> Dict:
 
     for order in orders:
         product = order.product
-        price = getattr(product, "price", 0) if product else 0
+        product_name = getattr(product, "name", "Unknown") if product else "Unknown"
+
+        unit_price = getattr(order, "unit_price", None)
+        line_total = getattr(order, "line_total", None)
+        total_amount = getattr(order, "total_amount", None)
+
         quantity = getattr(order, "quantity", 0)
-        subtotal = round(price * quantity, 2)
-        items.append(
-            {
-                "product_name": (
-                    getattr(product, "name", "Unknown") if product else "Unknown"
-                ),
-                "quantity": quantity,
-                "price": price,
-                "subtotal": subtotal,
-            }
-        )
-        total += subtotal
+
+        if unit_price is not None:
+            subtotal = round(unit_price * quantity, 2)
+            price_val = float(unit_price)
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": price_val,
+                    "subtotal": float(subtotal),
+                }
+            )
+            total += subtotal
+        elif line_total is not None:
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(line_total),
+                }
+            )
+            total += float(line_total or 0.0)
+        elif getattr(product, "price", None) is not None:
+            price_val = float(getattr(product, "price", 0.0))
+            subtotal = round(price_val * quantity, 2)
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": price_val,
+                    "subtotal": subtotal,
+                }
+            )
+            total += subtotal
+        else:
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(total_amount or 0.0),
+                }
+            )
+            total += float(total_amount or 0.0)
+
         collected = collected and bool(order.collected)
         created_at = created_at or getattr(order, "created_at", None)
 
@@ -253,80 +383,7 @@ def get_order_by_code(db: Session, code: str) -> Dict:
     }
 
 
-def generate_order_code(db: Session):
-    characters = string.ascii_uppercase + string.digits
-    while True:
-        code = "".join(random.choices(characters, k=6))
-        existing_order = (
-            db.query(models.Order).filter(models.Order.code == code).first()
-        )
-        if not existing_order:
-            return code
-
-
-def create_orders(
-    db: Session, orders: List[schemas.OrderCreate], user_id: int | None = None
-):
-    order_code = generate_order_code(db)
-    total = 0.0
-    order_items = []
-
-    for order_data in orders:
-        product = get_product(db, order_data.product_id)
-        if not product:
-            raise HTTPException(
-                status_code=404, detail=f"Product {order_data.product_id} not found"
-            )
-        if product.quantity < order_data.quantity:
-            raise HTTPException(
-                status_code=400, detail=f"Insufficient quantity for {product.name}"
-            )
-
-        product.quantity -= order_data.quantity
-
-        item_total = product.price * order_data.quantity
-        total += item_total
-
-        new_order = models.Order(
-            product_id=order_data.product_id,
-            quantity=order_data.quantity,
-            code=order_code,
-            collected=False,
-            total_amount=item_total,
-            user_id=user_id,  # 👈 save who placed it
-        )
-
-        db.add(new_order)
-        order_items.append(
-            {"product_name": product.name, "quantity": order_data.quantity}
-        )
-
-    db.commit()
-
-    return {
-        "code": order_code,
-        "total": round(total, 2),
-        "collected": False,
-        "items": order_items,
-    }
-
-
-def mark_orders_collected_by_code(db: Session, code: str):
-    orders = db.query(models.Order).filter(models.Order.code == code).all()
-    if not orders:
-        raise HTTPException(status_code=404, detail="No orders found with that code")
-    for order in orders:
-        order.collected = True
-    db.commit()
-    return orders
-
-
 def get_user_orders_grouped(db: Session, user_id: int) -> List[Dict]:
-    """
-    Return grouped orders for a specific user (grouped by code).
-    Each returned group:
-      { code, items: [{product_name, quantity, price, subtotal}], total, collected, created_at }
-    """
     orders = (
         db.query(models.Order)
         .options(joinedload(models.Order.product))
@@ -350,19 +407,54 @@ def get_user_orders_grouped(db: Session, user_id: int) -> List[Dict]:
 
         product = getattr(ord_row, "product", None)
         product_name = getattr(product, "name", "Unknown") if product else "Unknown"
-        price = getattr(product, "price", 0.0) if product else 0.0
-        quantity = getattr(ord_row, "quantity", 0)
-        subtotal = round(price * quantity, 2)
 
-        grouped[code]["items"].append(
-            {
-                "product_name": product_name,
-                "quantity": quantity,
-                "price": price,
-                "subtotal": subtotal,
-            }
-        )
-        grouped[code]["total"] += subtotal
+        unit_price = getattr(ord_row, "unit_price", None)
+        line_total = getattr(ord_row, "line_total", None)
+        total_amount = getattr(ord_row, "total_amount", None)
+        quantity = getattr(ord_row, "quantity", 0)
+
+        if unit_price is not None:
+            subtotal = round(unit_price * quantity, 2)
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": float(unit_price),
+                    "subtotal": float(subtotal),
+                }
+            )
+            grouped[code]["total"] += subtotal
+        elif line_total is not None:
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(line_total),
+                }
+            )
+            grouped[code]["total"] += float(line_total or 0.0)
+        elif getattr(product, "price", None) is not None:
+            price = float(getattr(product, "price", 0.0))
+            subtotal = round(price * quantity, 2)
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": price,
+                    "subtotal": subtotal,
+                }
+            )
+            grouped[code]["total"] += subtotal
+        else:
+            grouped[code]["items"].append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(total_amount or 0.0),
+                }
+            )
+            grouped[code]["total"] += float(total_amount or 0.0)
+
         grouped[code]["collected"] = grouped[code]["collected"] and bool(
             ord_row.collected
         )
@@ -373,18 +465,13 @@ def get_user_orders_grouped(db: Session, user_id: int) -> List[Dict]:
     results = list(grouped.values())
     results.sort(key=lambda x: x.get("created_at") or datetime.min, reverse=True)
 
-    # round totals
     for r in results:
         r["total"] = round(r.get("total", 0.0) or 0.0, 2)
 
     return results
 
 
-def get_user_order_by_code(db: Session, user_id: int, code: str) -> Dict | None:
-    """
-    Return grouped order for this user filtered by code (case-insensitive).
-    Returns None if not found.
-    """
+def get_user_order_by_code(db: Session, user_id: int, code: str) -> Optional[Dict]:
     normalized_code = code.strip().upper()
 
     orders = (
@@ -408,17 +495,55 @@ def get_user_order_by_code(db: Session, user_id: int, code: str) -> Dict | None:
 
     for o in orders:
         product = o.product
-        price = getattr(product, "price", 0) if product else 0
-        subtotal = round(price * o.quantity, 2)
-        items.append(
-            {
-                "product_name": product.name if product else "Unknown",
-                "quantity": o.quantity,
-                "price": price,
-                "subtotal": subtotal,
-            }
-        )
-        total += subtotal
+        product_name = getattr(product, "name", "Unknown") if product else "Unknown"
+
+        unit_price = getattr(o, "unit_price", None)
+        line_total = getattr(o, "line_total", None)
+        total_amount = getattr(o, "total_amount", None)
+        quantity = getattr(o, "quantity", 0)
+
+        if unit_price is not None:
+            subtotal = round(unit_price * quantity, 2)
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": float(unit_price),
+                    "subtotal": float(subtotal),
+                }
+            )
+            total += subtotal
+        elif line_total is not None:
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(line_total),
+                }
+            )
+            total += float(line_total or 0.0)
+        elif getattr(product, "price", None) is not None:
+            price = float(getattr(product, "price", 0.0))
+            subtotal = round(price * quantity, 2)
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "price": price,
+                    "subtotal": subtotal,
+                }
+            )
+            total += subtotal
+        else:
+            items.append(
+                {
+                    "product_name": product_name,
+                    "quantity": quantity,
+                    "subtotal": float(total_amount or 0.0),
+                }
+            )
+            total += float(total_amount or 0.0)
+
         collected = collected and bool(o.collected)
         created_at = created_at or getattr(o, "created_at", None)
 

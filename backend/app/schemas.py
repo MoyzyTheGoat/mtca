@@ -33,6 +33,7 @@ class ProductResponse(ProductBase):
 
 
 # ---------- Order Schemas ----------
+# ---------- Order Schemas ----------
 class OrderCreate(BaseModel):
     product_id: int
     quantity: int
@@ -52,9 +53,13 @@ class OrderList(BaseModel):
 class OrderItem(BaseModel):
     product_name: str
     quantity: int
-    # optional fields that may be present depending on the endpoint
-    price: Optional[float] = None
-    subtotal: Optional[float] = None
+    # snapshot/legacy fields:
+    price: Optional[float] = None  # unit price at purchase (keeps old field name)
+    subtotal: Optional[float] = None  # line total (keeps old field name)
+
+    # explicit snapshot names (optional; may be present depending on endpoint)
+    unit_price: Optional[float] = None
+    line_total: Optional[float] = None
 
 
 # Small user summary for including in order responses
@@ -69,11 +74,9 @@ class UserSimple(BaseModel):
 class OrderDetail(BaseModel):
     code: str
     items: List[OrderItem]
-    total: float
+    total: float  # legacy field used by frontend (sum of subtotals)
     collected: bool
-    # optional: who placed the order (username + id)
     user: Optional[UserSimple] = None
-    # optional created timestamp for grouped orders if you return it
     created_at: Optional[datetime] = None
 
     class Config:
@@ -82,19 +85,6 @@ class OrderDetail(BaseModel):
 
 class OrderResponse(OrderDetail):
     pass
-
-
-# ---------- Per-row user-facing response (if used) ----------
-class UserOrderResponse(BaseModel):
-    id: int
-    code: str
-    quantity: int
-    collected: bool
-    product: ProductResponse
-    created_at: datetime
-
-    class Config:
-        orm_mode = True
 
 
 # ---------- User / Auth Schemas ----------

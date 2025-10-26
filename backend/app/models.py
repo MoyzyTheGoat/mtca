@@ -12,6 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import Text
 from .database import Base
+from datetime import datetime
 
 
 class User(Base):
@@ -53,7 +54,17 @@ class Order(Base):
     collected = Column(Boolean, default=False, nullable=False)
     total_amount = Column(Float, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
+    unit_price = Column(Float, nullable=False, default=0.0)  # price at time of purchase
+    line_total = Column(Float, nullable=False, default=0.0)  # unit_price * quantity
     # ✅ Relationships
     product = relationship("Product", back_populates="orders")
     user = relationship("User", back_populates="orders")
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    jti = Column(String, unique=True, index=True, nullable=False)
+    revoked_at = Column(DateTime, default=datetime.utcnow)
+    reason = Column(String, nullable=True)
