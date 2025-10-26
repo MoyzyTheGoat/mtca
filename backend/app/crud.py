@@ -6,6 +6,8 @@ from . import models, schemas
 import random
 import string
 from datetime import datetime
+from sqlalchemy import func
+
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
@@ -315,11 +317,16 @@ def get_user_orders_grouped(db: Session, user_id: int):
 
 def get_user_order_by_code(db: Session, user_id: int, code: str):
     """
-    Return grouped order for this user filtered by code.
+    Return grouped order for this user filtered by code (case-insensitive).
     """
+    normalized_code = code.strip().upper()
+
     orders = (
         db.query(models.Order)
-        .filter(models.Order.user_id == user_id, models.Order.code == code)
+        .filter(
+            models.Order.user_id == user_id,
+            func.upper(models.Order.code) == normalized_code,
+        )
         .order_by(models.Order.created_at.desc())
         .all()
     )
@@ -349,7 +356,7 @@ def get_user_order_by_code(db: Session, user_id: int, code: str):
         created_at = created_at or o.created_at
 
     return {
-        "code": code,
+        "code": normalized_code,
         "items": items,
         "total": total,
         "collected": collected,

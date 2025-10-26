@@ -43,7 +43,7 @@ def get_my_order_by_code(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    result = crud.get_user_order_by_code(db, current_user.id, code.upper())
+    result = crud.get_user_order_by_code(db, current_user.id, code)
     if not result:
         raise HTTPException(status_code=404, detail="Order not found or not yours")
     return result
