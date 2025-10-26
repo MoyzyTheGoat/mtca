@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/api/axios';
 import { Product, CartItem } from '@/types';
@@ -12,6 +13,7 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState(''); // 🔍 Search term state
   const { isAuthenticated, isAdmin } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchProducts();
@@ -53,7 +55,14 @@ const Home = () => {
       saveCart([...cart, { product, quantity: 1 }]);
     }
 
-    toast.success(`${product.name} added to cart!`);
+    // Success toast with action button that navigates to /cart when clicked
+    toast.success(`${product.name} added to cart!`, {
+      action: {
+        label: 'View cart',
+        // sonner will call this when user clicks the action button
+        onClick: () => navigate('/cart'),
+      },
+    });
   };
 
   // 🔍 Filter products by search term
@@ -81,9 +90,9 @@ const Home = () => {
         {/* Header and Search Bar */}
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold text-foreground">Fresh Products</h1>
+            <h1 className="text-4xl font-bold text-foreground">Products</h1>
             <p className="mt-2 text-muted-foreground">
-              Browse our selection of quality products
+              Browse our selection of high-quality products.
             </p>
           </div>
 

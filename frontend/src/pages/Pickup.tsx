@@ -126,7 +126,7 @@ const Pickup = () => {
                   <div className="flex justify-between text-xl font-bold">
                     <span>Total</span>
                     <span className="text-primary">
-                      ${order.total.toFixed(2)}
+                      ₦{order.total.toFixed(2)}
                     </span>
                   </div>
                 </div>

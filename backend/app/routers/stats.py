@@ -17,9 +17,17 @@ def get_order_stats(
     start_date: str = Query(None),
     end_date: str = Query(None),
 ):
+    """
+    Returns statistics. Important: total_orders counts unique order codes (not item rows).
+    Date filters apply to the Order.created_at column.
+    """
+
+    # Base query: collected orders only
     query = db.query(models.Order).filter(models.Order.collected == True)
 
     now = datetime.utcnow()
+
+    # Apply date range filters to `query`
     if range == "day":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         query = query.filter(models.Order.created_at >= start)
@@ -40,12 +48,21 @@ def get_order_stats(
                 and_(models.Order.created_at >= start, models.Order.created_at <= end)
             )
         except ValueError:
-            return {"error": "Invalid date format. Use YYYY-MM-DD."}
-    total_orders = query.count()
+            raise HTTPException(
+                status_code=400, detail="Invalid date format. Use YYYY-MM-DD."
+            )
+
+    # --- total_orders: count distinct codes (unique orders) ---
+    total_orders = (
+        query.with_entities(func.count(func.distinct(models.Order.code))).scalar() or 0
+    )
+
+    # --- total_revenue: sum of total_amount across filtered rows (this is correct for revenue) ---
     total_revenue = (
         query.with_entities(func.sum(models.Order.total_amount)).scalar() or 0
     )
 
+    # --- monthly_stats: revenue per month (formatted YYYY-MM) ---
     monthly_stats = (
         query.with_entities(
             func.strftime("%Y-%m", models.Order.created_at).label("month"),
@@ -56,14 +73,14 @@ def get_order_stats(
         .all()
     )
 
+    # --- top_products: use the same filtered query joined to Product to get sums ---
     top_products = (
-        db.query(
+        query.join(models.Product)
+        .with_entities(
             models.Product.name,
             func.sum(models.Order.quantity).label("total_sold"),
             func.sum(models.Order.total_amount).label("revenue"),
         )
-        .join(models.Product)
-        .filter(models.Order.collected == True)
         .group_by(models.Product.name)
         .order_by(func.sum(models.Order.quantity).desc())
         .limit(5)
@@ -71,10 +88,13 @@ def get_order_stats(
     )
 
     return {
-        "total_orders": total_orders,
-        "total_revenue": total_revenue,
-        "monthly_stats": [{"month": m, "revenue": r} for m, r in monthly_stats],
+        "total_orders": int(total_orders),
+        "total_revenue": float(total_revenue),
+        "monthly_stats": [
+            {"month": m, "revenue": float(r or 0)} for m, r in monthly_stats
+        ],
         "top_products": [
-            {"name": n, "total_sold": s, "revenue": r} for n, s, r in top_products
+            {"name": n, "total_sold": int(s or 0), "revenue": float(r or 0)}
+            for n, s, r in top_products
         ],
     }

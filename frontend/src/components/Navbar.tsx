@@ -1,7 +1,7 @@
-import { Link, useLocation } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
-import { ShoppingCart, Package, LogOut, User, ShieldCheck } from 'lucide-react';
+import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
+import { Button } from "@/components/ui/button";
+import { ShoppingCart, Package, LogOut, User, ShieldCheck } from "lucide-react";
 
 const Navbar = () => {
   const { isAuthenticated, isAdmin, logout, user } = useAuth();
@@ -14,35 +14,46 @@ const Navbar = () => {
       <div className="container mx-auto flex items-center justify-between px-4 py-4">
         <Link to="/" className="flex items-center gap-2">
           <Package className="h-6 w-6 text-primary" />
-          <span className="text-xl font-bold text-foreground">FreshMart</span>
+          <span className="text-xl font-bold text-foreground">MTCA</span>
         </Link>
 
         <div className="flex items-center gap-6">
           <Link
             to="/"
-            className={`transition-colors hover:text-primary ${
-              isActive('/') ? 'font-semibold text-primary' : 'text-muted-foreground'
-            }`}
+            className={`transition-colors hover:text-primary ${isActive("/") ? "font-semibold text-primary" : "text-muted-foreground"
+              }`}
           >
             Products
           </Link>
 
           {isAuthenticated && !isAdmin && (
-            <Link
-              to="/cart"
-              className={`transition-colors hover:text-primary ${
-                isActive('/cart') ? 'font-semibold text-primary' : 'text-muted-foreground'
-              }`}
-            >
-              <ShoppingCart className="h-5 w-5" />
-            </Link>
+            <>
+              <Link
+                to="/cart"
+                aria-label="Cart"
+                className={`flex items-center gap-2 transition-colors hover:text-primary ${isActive("/cart") ? "font-semibold text-primary" : "text-muted-foreground"
+                  }`}
+              >
+                <ShoppingCart className="h-5 w-5" />
+                <span className="hidden sm:inline text-sm">Cart</span>
+              </Link>
+
+              <Link
+                to="/my-orders"
+                aria-label="My Orders"
+                className={`flex items-center gap-2 transition-colors hover:text-primary ${isActive("/my-orders") ? "font-semibold text-primary" : "text-muted-foreground"
+                  }`}
+              >
+                <Package className="h-5 w-5" />
+                <span className="hidden sm:inline text-sm">My Orders</span>
+              </Link>
+            </>
           )}
 
           <Link
             to="/pickup"
-            className={`transition-colors hover:text-primary ${
-              isActive('/pickup') ? 'font-semibold text-primary' : 'text-muted-foreground'
-            }`}
+            className={`transition-colors hover:text-primary ${isActive("/pickup") ? "font-semibold text-primary" : "text-muted-foreground"
+              }`}
           >
             Pickup
           </Link>
@@ -50,12 +61,11 @@ const Navbar = () => {
           {isAdmin && (
             <Link
               to="/admin"
-              className={`flex items-center gap-1 transition-colors hover:text-primary ${
-                isActive('/admin') ? 'font-semibold text-primary' : 'text-muted-foreground'
-              }`}
+              className={`flex items-center gap-1 transition-colors hover:text-primary ${isActive("/admin") ? "font-semibold text-primary" : "text-muted-foreground"
+                }`}
             >
               <ShieldCheck className="h-5 w-5" />
-              Admin
+              <span className="hidden sm:inline text-sm">Admin</span>
             </Link>
           )}
 

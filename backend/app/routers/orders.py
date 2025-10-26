@@ -15,18 +15,38 @@ from fastapi import Body
 @router.post(
     "/",
     response_model=schemas.OrderResponse,
-    dependencies=[Depends(auth.get_current_user)],
 )
 def create_orders_endpoint(
     orders: List[schemas.OrderCreate] = Body(...),
     db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),  # ✅ get actual user
 ):
-    return crud.create_orders(db, orders)
+    return crud.create_orders(db, orders, user_id=current_user.id)  # ✅ pass user_id
 
 
 @router.get("/", response_model=List[schemas.OrderResponse])
 def read_orders(db: Session = Depends(get_db)):
     return crud.get_all_orders(db)
+
+
+@router.get("/my")
+def get_my_orders(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    return crud.get_user_orders_grouped(db, current_user.id)
+
+
+@router.get("/my/{code}")
+def get_my_order_by_code(
+    code: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    result = crud.get_user_order_by_code(db, current_user.id, code.upper())
+    if not result:
+        raise HTTPException(status_code=404, detail="Order not found or not yours")
+    return result
 
 
 @router.get("/{code}", response_model=schemas.OrderResponse)

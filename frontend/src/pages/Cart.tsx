@@ -1,50 +1,125 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import api from '@/api/axios';
-import { CartItem, OrderResponse } from '@/types';
-import Navbar from '@/components/Navbar';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Minus, Plus, Trash2, ShoppingBag } from 'lucide-react';
-import { toast } from 'sonner';
+import { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import api from "@/api/axios";
+import { CartItem, OrderResponse } from "@/types";
+import Navbar from "@/components/Navbar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Trash2, ShoppingBag } from "lucide-react";
+import { toast } from "sonner";
 
+/**
+ * Cart component:
+ * - Allows typing any value into quantity inputs (raw string state)
+ * - Commits quantity on blur or Enter keypress (parses, clamps to stock)
+ * - If typed quantity > available stock -> clamps to stock and shows toast
+ * - Saves to localStorage on commit
+ */
 const Cart = () => {
   const [cart, setCart] = useState<CartItem[]>([]);
+  // rawInputs holds the free-typing string values per product id
+  const [rawInputs, setRawInputs] = useState<Record<number, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
+  const commitTimers = useRef<Record<number, number | null>>({}); // optional debounce if you want
 
   useEffect(() => {
     loadCart();
   }, []);
 
+  // whenever cart changes, sync rawInputs so inputs reflect current quantities
+  useEffect(() => {
+    const map: Record<number, string> = {};
+    cart.forEach((item) => {
+      map[item.product.id] = String(item.quantity);
+    });
+    setRawInputs(map);
+  }, [cart]);
+
   const loadCart = () => {
-    const savedCart = localStorage.getItem('cart');
+    const savedCart = localStorage.getItem("cart");
     if (savedCart) {
-      setCart(JSON.parse(savedCart));
+      try {
+        const parsed: CartItem[] = JSON.parse(savedCart);
+        setCart(parsed);
+      } catch {
+        setCart([]);
+      }
     }
   };
 
   const saveCart = (updatedCart: CartItem[]) => {
-    localStorage.setItem('cart', JSON.stringify(updatedCart));
+    localStorage.setItem("cart", JSON.stringify(updatedCart));
     setCart(updatedCart);
   };
 
-  const updateQuantity = (productId: number, delta: number) => {
-    const updatedCart = cart
-      .map((item) =>
-        item.product.id === productId
-          ? { ...item, quantity: item.quantity + delta }
-          : item
-      )
-      .filter((item) => item.quantity > 0);
+  // update the raw string as user types — allows typing without selecting existing text
+  const handleRawInputChange = (productId: number, value: string) => {
+    setRawInputs((prev) => ({ ...prev, [productId]: value }));
 
-    saveCart(updatedCart);
+    // OPTIONAL: debounce auto-commit while typing (commented out)
+    // if (commitTimers.current[productId]) window.clearTimeout(commitTimers.current[productId]!);
+    // commitTimers.current[productId] = window.setTimeout(() => commitQuantity(productId), 1000);
+  };
+
+  // Commit the typed value into the cart (on blur or Enter)
+  const commitQuantity = (productId: number) => {
+    const raw = rawInputs[productId];
+    // parse int, allow commas/spaces etc by removing non-digits
+    const cleaned = (raw || "").replace(/[^\d]/g, "");
+    let parsed = parseInt(cleaned, 10);
+    if (Number.isNaN(parsed) || parsed < 1) parsed = 1;
+
+    // find the cart item
+    const idx = cart.findIndex((c) => c.product.id === productId);
+    if (idx === -1) {
+      // nothing to commit
+      setRawInputs((prev) => ({ ...prev, [productId]: String(parsed) }));
+      return;
+    }
+
+    const availableStock = Number(cart[idx].product.quantity ?? Infinity);
+
+    if (availableStock !== Infinity && parsed > availableStock) {
+      toast.error(
+        `Only ${availableStock} unit${availableStock === 1 ? "" : "s"} available. Quantity set to ${availableStock}.`
+      );
+      parsed = availableStock;
+    }
+
+    // update cart
+    const updated = cart.map((c, i) => (i === idx ? { ...c, quantity: parsed } : c));
+    saveCart(updated);
+
+    // sync raw input to committed value
+    setRawInputs((prev) => ({ ...prev, [productId]: String(parsed) }));
+  };
+
+  const handleQuantityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, productId: number) => {
+    if (e.key === "Enter") {
+      // commit on Enter
+      (e.target as HTMLInputElement).blur(); // triggers onBlur as well
+      commitQuantity(productId);
+    }
+    if (e.key === "Escape") {
+      // reset to last committed value
+      const item = cart.find((c) => c.product.id === productId);
+      setRawInputs((prev) => ({ ...prev, [productId]: item ? String(item.quantity) : "1" }));
+      (e.target as HTMLInputElement).blur();
+    }
   };
 
   const removeItem = (productId: number) => {
     const updatedCart = cart.filter((item) => item.product.id !== productId);
     saveCart(updatedCart);
-    toast.info('Item removed from cart');
+    // clean up raw input
+    setRawInputs((prev) => {
+      const copy = { ...prev };
+      delete copy[productId];
+      return copy;
+    });
+    toast.info("Item removed from cart");
   };
 
   const calculateTotal = () => {
@@ -53,7 +128,7 @@ const Cart = () => {
 
   const handleCheckout = async () => {
     if (cart.length === 0) {
-      toast.error('Your cart is empty');
+      toast.error("Your cart is empty");
       return;
     }
 
@@ -66,18 +141,19 @@ const Cart = () => {
         quantity: item.quantity,
       }));
 
-      const response = await api.post<OrderResponse>('/orders/', orderItems);
+      const response = await api.post<OrderResponse>("/orders/", orderItems);
 
-      localStorage.removeItem('cart');
+      localStorage.removeItem("cart");
       setCart([]);
+      setRawInputs({});
 
-      // ✅ The backend returns a list of order responses, all with the same code
+      // backend returns a code
       const pickupCode = response.data.code;
 
       toast.success(`Order placed! Your pickup code is: ${pickupCode}`);
       navigate(`/pickup?code=${pickupCode}`);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Failed to place order');
+      toast.error(error.response?.data?.detail || "Failed to place order");
     } finally {
       setIsLoading(false);
     }
@@ -94,7 +170,7 @@ const Cart = () => {
             <CardContent className="flex flex-col items-center justify-center py-16">
               <ShoppingBag className="mb-4 h-16 w-16 text-muted-foreground" />
               <p className="mb-4 text-xl text-muted-foreground">Your cart is empty</p>
-              <Button onClick={() => navigate('/')}>Continue Shopping</Button>
+              <Button onClick={() => navigate("/")}>Continue Shopping</Button>
             </CardContent>
           </Card>
         ) : (
@@ -113,33 +189,26 @@ const Cart = () => {
                       <div className="flex-1">
                         <h3 className="font-semibold">{item.product.name}</h3>
                         <p className="text-sm text-muted-foreground">{item.product.description}</p>
-                        <p className="mt-1 font-medium text-primary">
-                          ${item.product.price.toFixed(2)}
-                        </p>
+                        <p className="mt-1 font-medium text-primary">₦{item.product.price.toFixed(2)}</p>
                       </div>
+
                       <div className="flex items-center gap-4">
+                        {/* numeric input for quantity — raw string allows free typing */}
                         <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateQuantity(item.product.id, -1)}
-                          >
-                            <Minus className="h-4 w-4" />
-                          </Button>
-                          <span className="w-8 text-center font-medium">{item.quantity}</span>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => updateQuantity(item.product.id, 1)}
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="\d*"
+                            value={rawInputs[item.product.id] ?? String(item.quantity)}
+                            onChange={(e) => handleRawInputChange(item.product.id, e.target.value)}
+                            onBlur={() => commitQuantity(item.product.id)}
+                            onKeyDown={(e) => handleQuantityKeyDown(e, item.product.id)}
+                            className="w-24 text-center"
+                            aria-label={`Quantity for ${item.product.name}`}
+                          />
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeItem(item.product.id)}
-                        >
+
+                        <Button variant="ghost" size="icon" onClick={() => removeItem(item.product.id)}>
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </div>
@@ -161,18 +230,18 @@ const Cart = () => {
                         <span className="text-muted-foreground">
                           {item.product.name} x{item.quantity}
                         </span>
-                        <span>${(item.product.price * item.quantity).toFixed(2)}</span>
+                        <span>₦{(item.product.price * item.quantity).toFixed(2)}</span>
                       </div>
                     ))}
                   </div>
                   <div className="border-t pt-4">
                     <div className="flex justify-between text-lg font-bold">
                       <span>Total</span>
-                      <span className="text-primary">${calculateTotal().toFixed(2)}</span>
+                      <span className="text-primary">₦{calculateTotal().toFixed(2)}</span>
                     </div>
                   </div>
                   <Button className="w-full" onClick={handleCheckout} disabled={isLoading}>
-                    {isLoading ? 'Processing...' : 'Checkout'}
+                    {isLoading ? "Processing..." : "Checkout"}
                   </Button>
                 </CardContent>
               </Card>

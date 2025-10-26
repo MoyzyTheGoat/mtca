@@ -50,7 +50,7 @@ const ProductCard = ({ product, onAddToCart, showAddButton = true }: ProductCard
       </CardHeader>
 
       <CardContent>
-        <p className="text-2xl font-bold text-primary">${product.price.toFixed(2)}</p>
+        <p className="text-2xl font-bold text-primary">₦{product.price.toFixed(2)}</p>
       </CardContent>
 
       {showAddButton && onAddToCart && (

@@ -12,7 +12,7 @@ import Pickup from "./pages/Pickup";
 import AdminDashboard from "./pages/AdminDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import NotFound from "./pages/NotFound";
-
+import MyOrders from "./pages/MyOrders";
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -32,6 +32,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Cart />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/my-orders"
+              element={
+                <ProtectedRoute>
+                  <MyOrders />
                 </ProtectedRoute>
               }
             />

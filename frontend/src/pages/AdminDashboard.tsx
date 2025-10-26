@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import api from "@/api/axios";
 import { Product, OrderDetail } from "@/types";
 import Navbar from "@/components/Navbar";
@@ -99,11 +99,13 @@ const AdminDashboard = () => {
   };
 
   const fetchAllOrders = async () => {
+    setIsLoadingAllOrders(true);
     try {
       const response = await api.get<OrderDetail[]>("/orders/");
       setAllOrders(response.data);
     } catch (error) {
       console.error("Failed to load orders:", error);
+      toast.error("Failed to load orders");
     } finally {
       setIsLoadingAllOrders(false);
     }
@@ -248,6 +250,59 @@ const AdminDashboard = () => {
     }
   };
 
+  /**
+   * Derive grouped orders from flat allOrders list.
+   * Each group:
+   *  - code: string
+   *  - items: flattened items array from all rows with that code
+   *  - total: computed from items (price * qty) when possible, otherwise fallback to sum of row totals
+   *  - collected: true if every row for that code is collected
+   */
+  const groupedOrders = useMemo(() => {
+    const map = allOrders.reduce((acc, ord) => {
+      const code = ord.code || "UNKNOWN";
+      if (!acc[code]) acc[code] = [];
+      acc[code].push(ord);
+      return acc;
+    }, {} as Record<string, OrderDetail[]>);
+
+    const groups = Object.entries(map).map(([code, orders]) => {
+      // flatten items
+      const items = orders.flatMap((o) => o.items ?? []);
+
+      // try compute total from item prices if available
+      let totalFromItems = 0;
+      let hasItemPrices = false;
+      for (const it of items) {
+        const p = Number((it as any).price ?? NaN);
+        const q = Number((it as any).quantity ?? 0);
+        if (!isNaN(p)) {
+          hasItemPrices = true;
+          totalFromItems += p * (isNaN(q) ? 0 : q);
+        }
+      }
+
+      // fallback: sum row totals (some APIs return total on each row)
+      const totalFromRows = orders.reduce((sum, o) => sum + (Number((o as any).total) || 0), 0);
+
+      const total = hasItemPrices ? totalFromItems : totalFromRows;
+
+      const collected = orders.every((o) => !!o.collected);
+
+      // Optional: dedupe items by product_name and sum quantities (if you want compact list)
+      // For now keep items as-is order-preserving.
+      return {
+        code,
+        items,
+        total: Number(total || 0),
+        collected,
+      };
+    });
+
+    // sort newest first if your orders include created_at in nested rows (not assumed here)
+    return groups;
+  }, [allOrders]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -370,7 +425,7 @@ const AdminDashboard = () => {
                           </div>
                         </div>
                         <span className="text-lg font-bold text-primary">
-                          ${product.price.toFixed(2)}
+                          ₦{product.price.toFixed(2)}
                         </span>
                       </div>
                     ))}
@@ -486,7 +541,7 @@ const AdminDashboard = () => {
                       <div className="rounded-lg border p-4">
                         <p className="text-sm text-muted-foreground">Total Revenue</p>
                         <p className="text-2xl font-bold text-primary">
-                          ${Number(stats.total_revenue || 0).toFixed(2)}
+                          ₦{Number(stats.total_revenue || 0).toFixed(2)}
                         </p>
                       </div>
 
@@ -496,7 +551,7 @@ const AdminDashboard = () => {
                           <div>
                             <p className="font-semibold">{stats.top_products[0].name}</p>
                             <p className="text-sm text-muted-foreground">
-                              Sold: {stats.top_products[0].total_sold} • Revenue: $
+                              Sold: {stats.top_products[0].total_sold} • Revenue: ₦
                               {Number(stats.top_products[0].revenue || 0).toFixed(2)}
                             </p>
                           </div>
@@ -517,7 +572,7 @@ const AdminDashboard = () => {
                             {stats.monthly_stats.map((m) => (
                               <div key={m.month} className="flex justify-between">
                                 <span className="text-sm text-muted-foreground">{m.month}</span>
-                                <span className="font-medium">${Number(m.revenue || 0).toFixed(2)}</span>
+                                <span className="font-medium">₦{Number(m.revenue || 0).toFixed(2)}</span>
                               </div>
                             ))}
                           </div>
@@ -542,7 +597,7 @@ const AdminDashboard = () => {
                                   </p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="font-medium">${Number(p.revenue || 0).toFixed(2)}</p>
+                                  <p className="font-medium">₦{Number(p.revenue || 0).toFixed(2)}</p>
                                 </div>
                               </div>
                             ))}
@@ -563,7 +618,7 @@ const AdminDashboard = () => {
             <Card>
               <CardHeader>
                 <div className="flex justify-between items-center">
-                  <CardTitle>All Orders ({allOrders.length})</CardTitle>
+                  <CardTitle>All Orders ({groupedOrders.length})</CardTitle>
                   <Button variant="outline" onClick={fetchAllOrders} disabled={isLoadingAllOrders}>
                     <RefreshCw
                       className={`h-4 w-4 mr-2 ${isLoadingAllOrders ? "animate-spin" : ""}`}
@@ -577,48 +632,48 @@ const AdminDashboard = () => {
                   <div className="flex justify-center py-8">
                     <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
                   </div>
-                ) : allOrders.length === 0 ? (
+                ) : groupedOrders.length === 0 ? (
                   <p className="text-center text-muted-foreground py-8">No orders yet</p>
                 ) : (
                   <div className="space-y-3">
-                    {allOrders.map((order) => (
+                    {groupedOrders.map((group) => (
                       <div
-                        key={order.code}
+                        key={group.code}
                         className="border rounded-lg p-4 flex justify-between items-center"
                       >
                         <div>
-                          <p className="font-semibold">Code: {order.code}</p>
-                          {order.items?.map((item, i) => (
-                            <p key={i} className="text-sm text-muted-foreground">
-                              {item.product_name} × {item.quantity}
-                            </p>
-                          ))}
+                          <p className="font-semibold">Code: {group.code}</p>
+                          {group.items.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">No items</p>
+                          ) : (
+                            group.items.map((item, i) => (
+                              <p key={`${group.code}-${i}`} className="text-sm text-muted-foreground">
+                                {item.product_name} × {item.quantity}
+                              </p>
+                            ))
+                          )}
                           <p className="text-sm mt-1">
                             <Badge
-                              variant={order.collected ? "secondary" : "outline"}
+                              variant={group.collected ? "secondary" : "outline"}
                               className={
-                                order.collected
+                                group.collected
                                   ? "bg-green-100 text-green-800"
                                   : "bg-yellow-100 text-yellow-800"
                               }
                             >
-                              {order.collected ? "Collected" : "Pending"}
+                              {group.collected ? "Collected" : "Pending"}
                             </Badge>
                           </p>
                         </div>
                         <div className="text-right">
-                          {order.total && (
-                            <p className="font-bold text-primary mb-2">
-                              ${order.total.toFixed(2)}
-                            </p>
-                          )}
-                          {!order.collected && (
+                          <p className="font-bold text-primary mb-2">₦{group.total.toFixed(2)}</p>
+                          {!group.collected && (
                             <Button
                               size="sm"
-                              onClick={() => handleMarkAsCollected(order.code)}
-                              disabled={updatingOrderCode === order.code}
+                              onClick={() => handleMarkAsCollected(group.code)}
+                              disabled={updatingOrderCode === group.code}
                             >
-                              {updatingOrderCode === order.code ? (
+                              {updatingOrderCode === group.code ? (
                                 <>
                                   <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Updating...
                                 </>
@@ -705,7 +760,7 @@ const AdminDashboard = () => {
                     <div className="flex justify-between text-xl font-bold">
                       <span>Total</span>
                       <span className="text-primary">
-                        ${order?.total ? order.total.toFixed(2) : "0.00"}
+                        ₦{order?.total ? order.total.toFixed(2) : "0.00"}
                       </span>
                     </div>
                   </div>

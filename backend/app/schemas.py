@@ -1,4 +1,5 @@
 # schemas.py
+from datetime import datetime
 from pydantic import BaseModel, validator
 from typing import Optional, List
 
@@ -59,6 +60,18 @@ class OrderDetail(BaseModel):
 
 class OrderResponse(OrderDetail):
     pass
+
+
+class UserOrderResponse(BaseModel):
+    id: int
+    code: str
+    quantity: int
+    collected: bool
+    product: ProductResponse
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
 
 
 class UserCreate(BaseModel):
